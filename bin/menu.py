@@ -30,20 +30,17 @@ def main():
     except: sys.exit(0)
 
     idx = 0
-    w = 46 # Ancho aumentado para el nuevo logo
+    w = 46 
     border = "=" * w
     while True:
         os.system('clear')
-        out = []
-        out.append(f"{ '[SPACE] [ENTER] [ESC]'.center(w)}")
-        out.append(f"{RED}{border}{RESET}")
-        out.append("")
+        out = [f"{ '[SPACE] [ENTER] [ESC]'.center(w) }", f"{RED}{border}{RESET}", ""]
         for line in LOGO: out.append(f"{GREEN}{line.center(w)}{RESET}")
         
         try:
             raw = subprocess.check_output(["adb", "devices"]).decode().splitlines()
             serials = [l.split()[0] for l in raw if "device" in l and not l.startswith("List")]
-            devs = [f"{subprocess.check_output(['adb', '-s', s, 'shell', 'getprop', 'ro.product.model']).decode().strip()} ({s})") for s in serials]
+            devs = [f"{subprocess.check_output(['adb', '-s', s, 'shell', 'getprop', 'ro.product.model']).decode().strip()} ({s})" for s in serials]
         except: devs = []
         
         opts = devs + ["SETTINGS", "EXIT"]
@@ -54,7 +51,6 @@ def main():
                     m, s = opt.split(' (')
                     line = f"> {ORANGE}{m} {WHITE}({s.replace(')', '')}){RESET} <"
                 else: line = f"> {opt} <"
-                # Centrado compensando ANSI
                 clean_len = len(re.sub(r'\033\[[0-9;]*m', '', line))
                 out.append(" " * ((w - clean_len) // 2) + line)
             else:

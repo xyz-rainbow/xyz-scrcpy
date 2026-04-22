@@ -30,10 +30,16 @@ while true; do
     DEVICE_SERIAL=$(adb devices | grep -v "List of" | grep "device$" | awk '{print $1}' | head -1)
     
     if [ -n "$DEVICE_SERIAL" ]; then
-        # Verificar si hay una terminal de monitor abierta para este dispositivo
-        if ! pgrep -f "XYZ Monitor.*$DEVICE_SERIAL" > /dev/null; then
-            gnome-terminal --hide-menubar --geometry=40x15 --title="XYZ Monitor - $DEVICE_SERIAL" -- python3 /home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy/bin/menu.py --serial "$DEVICE_SERIAL"
-            sleep 5
+        # (Comentarios en español: Verificar sintaxis antes de intentar abrir terminal)
+        if python3 -m py_compile "/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy/bin/menu.py" > /dev/null 2>&1; then
+            # Verificar si hay una terminal de monitor abierta para este dispositivo
+            if ! pgrep -f "XYZ Monitor.*$DEVICE_SERIAL" > /dev/null; then
+                gnome-terminal --hide-menubar --geometry=40x15 --title="XYZ Monitor - $DEVICE_SERIAL" -- python3 /home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy/bin/menu.py --serial "$DEVICE_SERIAL"
+                sleep 5
+            fi
+        else
+            log_message "[CRITICAL] Error de sintaxis en menu.py. Terminal abortada para evitar spam."
+            sleep 30 # Esperar más tiempo si el código está roto
         fi
     fi
     sleep 10
