@@ -11,12 +11,7 @@ ASCII_ART = [
 ]
 
 # Colores ANSI
-RED = "\033[91m"
-GREEN = "\033[38;5;118m" 
-MAGENTA = "\033[35m"
-ORANGE = "\033[38;5;208m"
-WHITE = "\033[37m"
-RESET = "\033[0m"
+RED, GREEN, MAGENTA, ORANGE, WHITE, RESET = "\033[91m", "\033[38;5;118m", "\033[35m", "\033[38;5;208m", "\033[37m", "\033[0m"
 
 def get_key():
     fd = sys.stdin.fileno()
@@ -41,19 +36,13 @@ def main():
     except: sys.exit(0)
 
     idx = 0
-    w = 40
+    w = 42 # Ancho base para centrado
     border = "=" * w
     while True:
         os.system('clear')
-        out = []
-        # Header compacto solicitado
-        out.append(f"{ '[SPACE] [ENTER] [ESC]'.center(w)}")
-        out.append(f"{RED}{border.center(w)}{RESET}")
-        
-        # Arte ASCII
+        out = [f"{'{[SPACE] [ENTER] [ESC]}'.center(w)}", f"{RED}{border}{RESET}", ""]
         for line in ASCII_ART: out.append(f"{GREEN}{line.center(w)}{RESET}")
         
-        # Lista Dispositivos
         devs = get_devices()
         opts = devs + ["SETTINGS", "EXIT"]
         out.append("")
@@ -61,15 +50,19 @@ def main():
             if i == idx:
                 if "(" in opt:
                     m, s = opt.split(' (')
+                    # Texto seleccionado centrado con flechas simétricas
                     line = f"> {ORANGE}{m} {WHITE}({s.replace(')', '')}){RESET} <"
-                else: line = f"> {opt} <"
-                out.append(line.center(w+4))
-            else: out.append(f"  {opt}".center(w))
+                    # Ajuste de espacio para compensar caracteres ANSI invisibles en center()
+                    out.append(line.center(w + 24)) 
+                else:
+                    line = f"> {opt} <"
+                    out.append(line.center(w + 8))
+            else:
+                out.append(opt.center(w))
             
-        # Footer solicitado
-        out.append(f"\n{GREEN}{border.center(w)}{RESET}")
+        out.append(f"\n{GREEN}{border}{RESET}")
         out.append(f"{MAGENTA}{BRAND_NAME.center(w)}{RESET}")
-        out.append(f"{GREEN}{border.center(w)}{RESET}")
+        out.append(f"{GREEN}{border}{RESET}")
 
         sys.stdout.write("\n".join(out))
         sys.stdout.flush()
