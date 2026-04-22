@@ -249,10 +249,32 @@ systemctl --user status scrcpy-auto.service --no-pager -n 20
 
 These screenshots are kept as legacy visual references from earlier UI iterations:
 
-![Legacy former top screenshot](assets/actual_app-status.png)
-![Legacy terminal view](assets/terminal_main.png)
-![Legacy monitor view](assets/terminal_monitor.png)
-![Legacy branding preview](assets/rainbow_tech.png)
+<table>
+  <tr>
+    <td align="center">
+      <img src="assets/actual_app-status.png" alt="Legacy former top screenshot" width="260" />
+      <br />
+      <em>Legacy former top screenshot</em>
+    </td>
+    <td align="center">
+      <img src="assets/terminal_main.png" alt="Legacy terminal view" width="260" />
+      <br />
+      <em>Legacy terminal view</em>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="assets/terminal_monitor.png" alt="Legacy monitor view" width="260" />
+      <br />
+      <em>Legacy monitor view</em>
+    </td>
+    <td align="center">
+      <img src="assets/rainbow_tech.png" alt="Legacy branding preview" width="260" />
+      <br />
+      <em>Legacy branding preview</em>
+    </td>
+  </tr>
+</table>
 
 ## Credits
 
