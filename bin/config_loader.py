@@ -6,6 +6,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../config/config.json")
 
 DEFAULT_CONFIG = {
     "command_alias": "xyz-scrcpy",
+    "audio_target": "host",
     "sound": "output",
     "auto_start": True,
     "auto_discover": True,
@@ -27,6 +28,8 @@ def _normalize_config(raw_cfg):
             cfg[key] = raw_cfg[key]
 
     # Compatibilidad legacy
+    if "audio_target" not in raw_cfg and "sound" in raw_cfg:
+        cfg["audio_target"] = "device" if str(raw_cfg.get("sound", "output")) == "off" else "host"
     if "sound" not in raw_cfg and "default_audio" in raw_cfg:
         cfg["sound"] = raw_cfg.get("default_audio", cfg["sound"])
     if "auto_start" not in raw_cfg and "autostart" in raw_cfg:
@@ -48,7 +51,16 @@ def _normalize_config(raw_cfg):
     cfg["exit_pause_minutes"] = max(1, cfg["exit_pause_minutes"])
     cfg["pause_until_epoch"] = int(cfg.get("pause_until_epoch", 0) or 0)
     cfg["command_alias"] = str(cfg.get("command_alias", "xyz-scrcpy"))
-    cfg["sound"] = str(cfg.get("sound", "output"))
+    audio_target = str(cfg.get("audio_target", "host")).strip().lower()
+    if audio_target not in {"host", "device"}:
+        audio_target = "host"
+    cfg["audio_target"] = audio_target
+
+    cfg["sound"] = str(cfg.get("sound", "output")).strip().lower()
+    if cfg["sound"] not in {"output", "off"}:
+        cfg["sound"] = "output"
+    # Keep legacy key in sync during transition.
+    cfg["sound"] = "off" if cfg["audio_target"] == "device" else "output"
     cfg["resolution"] = str(cfg.get("resolution", "1080p"))
     return cfg
 

@@ -69,35 +69,107 @@ python3 install_xyz.py --action install --alias scrcpy --yes
 python3 install_xyz.py --action uninstall --yes
 ```
 
-## Runtime Behavior
+## Current App Features
 
-- Alias launcher executes `bin/launch_with_checks.sh`.
-- Checks are run through `bin/check_and_repair.sh` with timeout protection.
-- If checks fail, repair runs automatically, then checks rerun.
-- If still failing, the launcher asks:
-  - `Open menu anyway despite errors? (Y/n)`
-- Logs include guidance to report failures in GitHub Issues.
+### Interactive terminal UI
 
-## Settings
+- Dynamic centered menu that redraws with terminal width changes.
+- Arrow-key navigation (`UP/DOWN`) with `ENTER` to select.
+- Keyboard shortcuts shown in UI: `[SPACE] [ENTER] [ESC]`.
+- Live Android device list from `adb devices`.
+- Device labels include model and serial (`Model (serial)`).
+- `SETTINGS` and `EXIT` entries always available.
 
-From in-app `SETTINGS` you can configure:
-- `Command alias`: command name used to launch the app manually.
-- `Sound`: `output` or `off` for scrcpy audio behavior.
-- `Auto-start`: allows monitor automation flow when service is active.
-- `Auto-Discover`: when ON, monitor reacts to new device connection events.
-- `Pause on EXIT`: toggles pause behavior when leaving menu with `EXIT`.
-- `Pause duration (minutes)`: timeout-based resume window for paused mode.
+### Device launch behavior
 
-Applying alias changes syncs the launcher automatically via installer sync logic.
+- Launches `scrcpy` for selected device with software render driver (`--render-driver=software`).
+- Audio mode is configurable as:
+  - `output` (host audio enabled), or
+  - `off` (launches with `--no-audio`).
+- Menu lock prevents duplicate concurrent menu sessions (`/tmp/xyz_menu.lock`).
+
+### Settings currently implemented
+
+- `Command alias`:
+  - Editable inside settings.
+  - Sanitized to safe command characters.
+  - Synced automatically via installer `sync-alias` flow.
+- `Audio target`: `HOST` / `DEVICE`.
+- `Auto-start`: enables/disables monitor auto-launch behavior.
+- `Auto-Discover`: controls automatic reaction to device connection events.
+- `Pause on EXIT`: toggle between paused and immediate-start behavior.
+- `Pause duration (minutes)`: minimum 1 minute, adjustable in settings.
+- `[Apply]` and `[Cancel]` actions in settings.
 
 ### Pause and reconnect contract
 
-- `Pause on EXIT = ON` stores a paused state.
-- With `Auto-Discover = ON`, pause is lifted on a valid reconnect event:
-  - same serial reconnect after disconnect, or
-  - a different serial appears.
-- With `Auto-Discover = OFF`, reconnect does not auto-resume popup behavior.
-- Manual launcher alias always remains available regardless of auto-discover.
+- When `Pause on EXIT` is enabled and user exits menu, monitor enters paused state.
+- Pause stores:
+  - `pause_active`,
+  - `pause_wait_reconnect`,
+  - `pause_seen_disconnect`,
+  - `pause_until_epoch`.
+- With `Auto-Discover = ON`, pause can be lifted by valid reconnect conditions:
+  - a previously disconnected device reconnects, or
+  - device serial set changes and at least one device is present.
+- Pause is also lifted automatically when pause timeout is reached.
+- With `Auto-Discover = OFF`, reconnect does not auto-resume the monitor loop.
+
+### Background monitor service behavior
+
+- Monitor loop runs in `bin/monitor.sh`.
+- PID lock avoids multiple monitor instances (`/tmp/xyz_monitor.pid`).
+- Tracks previous/current device serial snapshots (`/tmp/xyz_monitor_serials.state`).
+- Performs Python syntax validation (`menu.py` + `config_loader.py`) before opening terminal.
+- Popup anti-spam protection:
+  - does not open extra monitor terminal if one is already active,
+  - does not open popup if any `scrcpy` process is already active.
+- Terminal geometry policy:
+  - base geometry includes extra height to avoid clipped header,
+  - adds one extra row per additional connected device.
+
+### Pre-launch checks and fail-open flow
+
+- Alias launcher executes `bin/launch_with_checks.sh`.
+- Launcher runs `bin/check_and_repair.sh` unless installer already pre-ran checks.
+- Checks include:
+  - Python syntax checks,
+  - monitor shell syntax check,
+  - full unit test suite.
+- Timeouts protect all major check/repair commands.
+- If checks fail:
+  - automatic repair is executed (`repair_xyz.sh`),
+  - checks are re-run.
+- If still failing:
+  - status becomes `FAIL_OPEN`,
+  - user is prompted `Open menu anyway despite errors? (Y/n)`.
+- `config/check.log` is generated and includes GitHub Issues reporting guidance.
+
+### Installer and uninstaller capabilities
+
+- Multi-OS support path logic for Linux, macOS, and Windows.
+- Semi-interactive startup with:
+  - `Install now (Y/n)`,
+  - confirmation prompt,
+  - custom launcher alias prompt.
+- Install flow supports:
+  - clean install (calls uninstall first),
+  - optional service enable (`Enable service (Y/n)`),
+  - optional test/check run with log display,
+  - opening initial mini terminal after install.
+- Uninstall flow includes:
+  - service/task stop first,
+  - startup disable/removal second,
+  - launcher cleanup (primary + managed orphan launchers),
+  - optional installed files removal,
+  - optional current repository removal with safety checks.
+- `sync-alias` action updates stored alias and launcher script without reinstall.
+
+## Runtime Behavior
+
+- Manual alias launch remains available regardless of monitor auto behavior.
+- Service mode uses monitor conditions to avoid terminal popup spam.
+- Interactive menu is always opened through pre-check gate when launched via alias.
 
 ## Repository Layout
 
@@ -110,6 +182,28 @@ Applying alias changes syncs the launcher automatically via installer sync logic
 - `tests/` — installer, monitor, and shell flow tests.
 - `systemd/scrcpy-auto.service` — service template/reference.
 - `config/` — runtime config and logs.
+
+## Feature to File Map
+
+| Feature | Main file/script | Notes |
+|---|---|---|
+| Interactive menu rendering and navigation | `bin/menu.py` | Dynamic width, centered layout, key handling |
+| Device discovery and labels | `bin/menu.py` | Uses `adb devices` + model lookup |
+| Device launch with audio target | `bin/menu.py` | Starts `scrcpy` with `--no-audio` when target is `DEVICE` |
+| Settings editing (`Apply`/`Cancel`) | `bin/menu.py` | Includes alias, sound, auto flags, pause options |
+| Pause activation on exit | `bin/menu.py` | Persists pause state/timer in config |
+| Config defaults and normalization | `bin/config_loader.py` | Backward compatibility and type coercion |
+| Config persistence (`config.json`) | `bin/config_loader.py` | Atomic save via temp file replace |
+| Auto monitor loop | `bin/monitor.sh` | Polls devices and decides popup launch |
+| Popup anti-spam guard | `bin/monitor.sh` | Detects active monitor terminal or `scrcpy` process |
+| Reconnect-aware pause resume | `bin/monitor.sh` | Uses serial snapshots and pause flags |
+| Pre-launch check gate | `bin/launch_with_checks.sh` | Runs checks, handles fail-open prompt |
+| Checks + auto-repair pipeline | `bin/check_and_repair.sh` | Syntax/tests, repair retry, check log |
+| Installer interactive flow | `install_xyz.py` | Install/uninstall/sync-alias, prompts and cleanup |
+| Service install/enable/disable/stop | `install_xyz.py` | OS-specific handling (Linux/macOS/Windows) |
+| Alias creation and synchronization | `install_xyz.py` | Launcher generation + managed launcher cleanup |
+| Runtime logs and diagnostics | `config/check.log`, `config/scrcpy.log` | Check pipeline and service output |
+| Unit/integration behavior coverage | `tests/` | Installer, monitor, launcher/check shell flows |
 
 ## Validation
 

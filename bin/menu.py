@@ -127,9 +127,9 @@ def list_devices():
         return []
 
 
-def launch_scrcpy(serial, sound):
+def launch_scrcpy(serial, audio_target):
     cmd = ["scrcpy", "-s", serial, "--render-driver=software"]
-    if sound == "off":
+    if audio_target == "device":
         cmd.append("--no-audio")
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -168,7 +168,7 @@ def settings_screen(cfg):
     field_idx = 0
     fields = [
         "command_alias",
-        "sound",
+        "audio_target",
         "auto_start",
         "auto_discover",
         "pause_on_exit",
@@ -188,7 +188,7 @@ def settings_screen(cfg):
         ]
         rows = [
             f"Command alias: {temp_cfg['command_alias']}",
-            f"Sound: {temp_cfg['sound']}",
+            f"Audio target: {temp_cfg.get('audio_target', 'host').upper()}",
             f"Auto-start: {'ON' if temp_cfg['auto_start'] else 'OFF'}",
             f"[Auto-Discover] [{'ON' if temp_cfg.get('auto_discover', True) else 'OFF'}]",
             f"[{pause_toggle_label}] on EXIT",
@@ -212,8 +212,9 @@ def settings_screen(cfg):
             field_idx = (field_idx + 1) % len(fields)
         elif key in ("\x1b[C", "\x1b[D", " "):
             name = fields[field_idx]
-            if name == "sound":
-                temp_cfg["sound"] = "off" if temp_cfg["sound"] == "output" else "output"
+            if name == "audio_target":
+                current = str(temp_cfg.get("audio_target", "host")).lower()
+                temp_cfg["audio_target"] = "device" if current == "host" else "host"
             elif name == "auto_start":
                 temp_cfg["auto_start"] = not temp_cfg["auto_start"]
             elif name == "auto_discover":
@@ -225,8 +226,9 @@ def settings_screen(cfg):
                 temp_cfg["exit_pause_minutes"] = max(1, int(temp_cfg["exit_pause_minutes"]) + step)
         elif key == "\r":
             name = fields[field_idx]
-            if name == "sound":
-                temp_cfg["sound"] = "off" if temp_cfg["sound"] == "output" else "output"
+            if name == "audio_target":
+                current = str(temp_cfg.get("audio_target", "host")).lower()
+                temp_cfg["audio_target"] = "device" if current == "host" else "host"
             elif name == "command_alias":
                 os.system("clear")
                 try:
@@ -298,7 +300,7 @@ def main():
                     cfg, _ = settings_screen(cfg)
                     continue
                 match = re.search(r"\((.*?)\)$", selected)
-                launch_scrcpy(match.group(1) if match else selected, cfg.get("sound", "output"))
+                launch_scrcpy(match.group(1) if match else selected, cfg.get("audio_target", "host"))
             elif key == "\x1b":
                 break
     finally:
