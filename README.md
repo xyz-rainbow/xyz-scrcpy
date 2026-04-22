@@ -20,6 +20,7 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 - `scrcpy`
 - `bash`
 - Linux desktop with `systemd --user` and `gnome-terminal` for full auto-start UX
+- Bundled upstream `scrcpy` in `vendor/` is currently aligned to latest stable tag `v3.3.4`
 
 ## Architecture and Flows (SVG)
 

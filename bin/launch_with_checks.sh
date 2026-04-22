@@ -28,7 +28,7 @@ open_detached_menu_terminal() {
 
     gnome-terminal \
         --hide-menubar \
-        --geometry=70x29 \
+        --geometry=40x18 \
         --title="XYZ Launcher" \
         -- \
         bash -lc "XYZ_LAUNCHER_WINDOW=1 bash \"$0\""

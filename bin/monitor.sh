@@ -171,11 +171,11 @@ evaluate_test_pause_state() {
 
 compute_terminal_geometry() {
     local device_count="$1"
-    local cols=70
-    local base_rows=29
+    local cols=40
+    local base_rows=18
     local extra_rows=0
 
-    # Keep three extra lines to avoid clipping header,
+    # Keep the target base size close to the requested visual dimensions,
     # then add one line per additional detected device.
     if [ "$device_count" -gt 1 ]; then
         extra_rows=$((device_count - 1))
