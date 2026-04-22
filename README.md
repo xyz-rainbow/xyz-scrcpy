@@ -3,7 +3,7 @@
 Interactive Android device launcher and monitor on top of `scrcpy`, built for users who want an auto-start background service plus a configurable terminal UI.
 
 <p align="center">
-  <img src="assets/app_real_preview.png" alt="Current real-world view of the app" width="360" />
+  <img src="assets/actual_app-status.png" alt="Current real-world view of the app" width="360" />
 </p>
 <p align="center"><em>Current app appearance (real usage screenshot)</em></p>
 
