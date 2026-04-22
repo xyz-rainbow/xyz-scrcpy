@@ -185,6 +185,7 @@ python3 install_xyz.py --action uninstall --yes
 - `tests/` — installer, monitor, and shell flow tests.
 - `systemd/scrcpy-auto.service` — service template/reference.
 - `config/` — runtime config and logs.
+- `docs/audio-mic-restart-risks-walkthrough.md` — risks and operational walkthrough for audio/mic/restart behavior.
 
 ## Feature to File Map
 
