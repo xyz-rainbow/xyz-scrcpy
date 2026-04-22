@@ -1,5 +1,12 @@
 {
-  "default_audio": "output",
-  "autostart": false,
-  "resolution": "1080p"
+  "command_alias": "scrcpy",
+  "sound": "output",
+  "auto_start": false,
+  "resolution": "1080p",
+  "exit_pause_minutes": 1440,
+  "pause_on_exit": false,
+  "pause_active": false,
+  "pause_until_epoch": 0,
+  "pause_wait_reconnect": false,
+  "pause_seen_disconnect": false
 }

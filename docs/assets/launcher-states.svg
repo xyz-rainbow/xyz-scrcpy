@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="260" viewBox="0 0 900 260" role="img" aria-labelledby="title desc">
+  <title id="title">Launcher State Diagram</title>
+  <desc id="desc">States for check pass, pass after repair, and fail-open prompt.</desc>
+  <defs>
+    <style>
+      .bg { fill: #101827; }
+      .node { fill: #1f2937; stroke: #9ca3af; stroke-width: 2; rx: 10; }
+      .txt { fill: #e5e7eb; font-family: Arial, sans-serif; font-size: 14px; }
+      .ok { stroke: #22c55e; stroke-width: 2.5; fill: none; marker-end: url(#a1); }
+      .warn { stroke: #f59e0b; stroke-width: 2.5; fill: none; marker-end: url(#a2); }
+    </style>
+    <marker id="a1" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#22c55e"/>
+    </marker>
+    <marker id="a2" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="900" height="260"/>
+
+  <rect class="node" x="40" y="90" width="170" height="80"/>
+  <text class="txt" x="58" y="125">Launch alias</text>
+  <text class="txt" x="58" y="145">run checks</text>
+
+  <rect class="node" x="280" y="30" width="220" height="80"/>
+  <text class="txt" x="298" y="64">PASS / PASS_AFTER_REPAIR</text>
+  <text class="txt" x="298" y="84">open menu directly</text>
+
+  <rect class="node" x="280" y="150" width="220" height="80"/>
+  <text class="txt" x="298" y="184">FAIL_OPEN</text>
+  <text class="txt" x="298" y="204">ask user confirmation</text>
+
+  <rect class="node" x="590" y="150" width="130" height="80"/>
+  <text class="txt" x="608" y="184">User says No</text>
+  <text class="txt" x="608" y="204">cancel launch</text>
+
+  <rect class="node" x="750" y="150" width="110" height="80"/>
+  <text class="txt" x="764" y="184">User says Yes</text>
+  <text class="txt" x="764" y="204">open menu</text>
+
+  <path class="ok" d="M210 110 L280 70"/>
+  <path class="warn" d="M210 150 L280 190"/>
+  <path class="warn" d="M500 190 L590 190"/>
+  <path class="warn" d="M500 205 L750 205"/>
+</svg>

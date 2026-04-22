@@ -1,72 +1,138 @@
-# 📱 XYZ-scrcpy - Premium Android Management System
+# XYZ-scrcpy
 
-A high-performance, interactive, and aesthetically pleasing Android device management system based on `scrcpy`. Built for power users under the **XYZ / Rainbowtechnology** standard.
+Interactive Android device launcher and monitor on top of `scrcpy`, built for users who want an auto-start background service plus a configurable terminal UI.
 
-*Un sistema de gestión de dispositivos Android de alto rendimiento, interactivo y estéticamente agradable basado en `scrcpy`. Creado para usuarios avanzados bajo el estándar **XYZ / Rainbowtechnology**.*
+<p align="center">
+  <img src="assets/app_real_preview.png" alt="Current real-world view of the app" width="360" />
+</p>
+<p align="center"><em>Current app appearance (real usage screenshot)</em></p>
 
----
+## Who This Is For
 
-## ⚡ Features / Características
+- Linux desktop users who connect Android devices frequently.
+- Users who want a background monitor service with popup control.
+- Users who need a custom command alias and quick recovery flow.
 
-- **Neon Aesthetics:** Lime Green and Magenta terminal UI with ASCII branding.
-- **Estética Neón:** Interfaz de terminal en Verde Lima y Magenta con branding ASCII.
-- **Interactive Menu:** Selection by device model, easy navigation with [SPACE], [ENTER], and [ESC].
-- **Menú Interactivo:** Selección por modelo de dispositivo, navegación fluida con [ESPACIO], [ENTER] y [ESC].
-- **Smart Autostart:** Background monitoring that opens a dedicated terminal per device upon connection.
-- **Autostart Inteligente:** Monitoreo en segundo plano que abre una terminal dedicada por dispositivo al conectarse.
-- **Concurrency Control:** Robust Singleton logic via `flock` and PID tracking to prevent duplicate windows.
-- **Control de Concurrencia:** Lógica Singleton robusta mediante `flock` y seguimiento de PID para evitar ventanas duplicadas.
-- **Portable Architecture:** Modular structure with dynamic config loading (no hardcoded paths).
-- **Arquitectura Portable:** Estructura modular con carga de configuración dinámica (sin rutas fijas).
+## Requirements
 
----
+- `python3`
+- `adb`
+- `scrcpy`
+- `bash`
+- Linux desktop with `systemd --user` and `gnome-terminal` for full auto-start UX
 
-## 📸 Preview / Vista Previa
+## Architecture and Flows (SVG)
 
-![Terminal Interface](assets/terminal_main.png)
-*Interactive Neon UI / Interfaz Interactiva Neón*
+![Architecture diagram](docs/assets/architecture.svg)
+*Main components and interactions.*
 
-![Modular Monitoring](assets/terminal_monitor.png)
-*Dedicated terminal per device / Terminal dedicada por dispositivo*
+![Install flow diagram](docs/assets/install-flow.svg)
+*Clean-install and post-install decision flow.*
 
-![Branding](assets/rainbow_tech.png)
-*Rainbow Technology Standard / Estándar Rainbow Technology*
+![Launcher states diagram](docs/assets/launcher-states.svg)
+*Launcher runtime states, including fail-open confirmation.*
 
----
+## Install and Run
 
-## 🚀 Installation / Instalación
-
-1. **Clone the repo / Clona el repo:**
+1. Clone repository:
    ```bash
    git clone https://github.com/xyz-rainbow/xyz-scrcpy.git
    cd xyz-scrcpy
    ```
 
-2. **Dependencies / Dependencias:**
-   Ensure you have `adb`, `scrcpy`, and `python3` installed.
-   *Asegúrate de tener instalados `adb`, `scrcpy` y `python3`.*
-
-3. **Deploy / Despliegue:**
-   Run the repair/install script to set up everything:
-   *Ejecuta el script de reparación/instalación para configurar todo:*
+2. Run installer:
    ```bash
-   ./repair_xyz.sh
+   python3 install_xyz.py
    ```
 
----
+3. Installer interactive flow:
+   - Clean install (full uninstall first).
+   - Prompt: `Enable service (Y/n)`.
+   - Prompt: `Run tests and view log (Y/n)`.
+   - Initial mini terminal launch at the end.
 
-## 🛠️ Usage / Uso
+4. Launch command:
+   - Use the alias you selected during install.
+   - Default alias is typically `xyz-scrcpy` unless changed.
 
-Simply write `scrcpy` in your terminal to launch the interactive menu.
-*Simplemente escribe `scrcpy` en tu terminal para lanzar el menú interactivo.*
+### Non-interactive examples
 
----
+```bash
+# Install with defaults
+python3 install_xyz.py --action install --yes
 
-## 💎 Branding & Identity / Identidad
+# Install with custom alias
+python3 install_xyz.py --action install --alias scrcpy --yes
 
-Developed by **XYZ / Rainbowtechnology**.
-*Desarrollado por **XYZ / Rainbowtechnology**.*
+# Full uninstall
+python3 install_xyz.py --action uninstall --yes
+```
 
-**GitHub Profile / Perfil de GitHub:** [https://github.com/xyz-rainbow](https://github.com/xyz-rainbow)
+## Runtime Behavior
 
-# #xyz-rainbowtechnology #rainbowtechnology.xyz #rainbow.xyz #i-love-you
+- Alias launcher executes `bin/launch_with_checks.sh`.
+- Checks are run through `bin/check_and_repair.sh` with timeout protection.
+- If checks fail, repair runs automatically, then checks rerun.
+- If still failing, the launcher asks:
+  - `Open menu anyway despite errors? (Y/n)`
+- Logs include guidance to report failures in GitHub Issues.
+
+## Settings
+
+From in-app `SETTINGS` you can configure:
+- Command alias
+- Sound mode
+- Auto-start behavior
+- Pause-on-exit behavior and duration (minutes)
+
+Applying alias changes syncs the launcher automatically via installer sync logic.
+
+## Repository Layout
+
+- `install_xyz.py` — multi-OS installer and uninstaller.
+- `bin/menu.py` — interactive terminal UI.
+- `bin/monitor.sh` — background monitor loop.
+- `bin/launch_with_checks.sh` — launcher with pre-check gate.
+- `bin/check_and_repair.sh` — checks + repair + fail-open status.
+- `bin/config_loader.py` — config defaults and persistence.
+- `tests/` — installer, monitor, and shell flow tests.
+- `systemd/scrcpy-auto.service` — service template/reference.
+- `config/` — runtime config and logs.
+
+## Validation
+
+```bash
+python3 -m py_compile install_xyz.py bin/menu.py bin/config_loader.py
+bash -n bin/monitor.sh
+bash -n bin/check_and_repair.sh
+bash -n bin/launch_with_checks.sh
+python3 -m unittest discover -s tests -p "test_*.py"
+```
+
+## Operations
+
+```bash
+# Restart service
+systemctl --user restart scrcpy-auto.service
+
+# Check service status
+systemctl --user status scrcpy-auto.service --no-pager -n 20
+
+# Manual repair workflow
+./repair_xyz.sh
+```
+
+## Past Visual Versions
+
+These screenshots are kept as legacy visual references from earlier UI iterations:
+
+![Legacy terminal view](assets/terminal_main.png)
+![Legacy monitor view](assets/terminal_monitor.png)
+![Legacy branding preview](assets/rainbow_tech.png)
+
+## Credits
+
+Developed by xyz-rainbow / Rainbowtechnology [XYZ]  
+GitHub https://github.com/xyz-rainbow
+
+#xyz-rainbowtechnology #i-love-you #xyz-rainbow

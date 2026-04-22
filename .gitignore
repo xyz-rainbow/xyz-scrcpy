@@ -1,0 +1,13 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local runtime logs
+config/check.log
+*.log
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
