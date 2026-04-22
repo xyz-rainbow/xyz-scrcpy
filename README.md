@@ -96,7 +96,7 @@ python3 install_xyz.py --action uninstall --yes
   - Synced automatically via installer `sync-alias` flow.
 - `Audio target`: `HOST` / `DEVICE`.
 - `Active Recall`: `ON` / `OFF` (captures microphone directly from Android via scrcpy when supported).
-- `Microphone Bus`: `ON` / `OFF` (prioritizes routing to virtual bus `xyz-mic-input`; Linux auto-setup via `pactl`, Windows requires external virtual cable setup).
+- `Microphone Bus`: `ON` / `OFF` (creates virtual input `xyz-mic-input`; Linux auto-setup via `pactl` without adding a dedicated extra output sink, Windows requires external virtual cable setup).
 - `Auto-start`: enables/disables monitor auto-launch behavior.
 - `Auto-Discover`: controls automatic reaction to device connection events.
 - `Pause on EXIT`: toggle between paused and immediate-start behavior.
@@ -111,7 +111,7 @@ python3 install_xyz.py --action uninstall --yes
 - If `active_recall=ON` and `audio_target=DEVICE`, config is normalized to `audio_target=HOST` for compatibility.
 - If current scrcpy version does not support Android microphone capture, app falls back safely with warning (no crash).
 - With `microphone_bus=ON`, app prioritizes virtual bus routing through `xyz-mic-input`.
-  - Linux: attempts automatic setup via `pactl` and routes using `PULSE_SINK`.
+  - Linux: creates a remapped source from the current default sink monitor (no dedicated extra virtual output sink).
   - Windows: shows guided fallback notice; requires external virtual audio cable setup (for example VB-CABLE) and manual routing.
 
 ### Pause and reconnect contract

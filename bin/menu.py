@@ -39,7 +39,6 @@ LOCK_PATH = "/tmp/xyz_menu.lock"
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
 LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
-MIC_BUS_SINK = f"{MIC_BUS_NAME}-sink"
 
 
 def get_key():
@@ -171,21 +170,35 @@ def ensure_microphone_bus(enabled):
         print("[WARN] microphone_bus requires 'pactl' (PulseAudio/PipeWire).")
         return False
     try:
+        # Cleanup legacy implementation that created an extra output sink.
+        modules = subprocess.check_output(["pactl", "list", "short", "modules"], text=True)
+        for line in modules.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            mod_id = parts[0].strip()
+            args = parts[-1]
+            if f"sink_name={MIC_BUS_NAME}-sink" in args:
+                subprocess.run(
+                    ["pactl", "unload-module", mod_id],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
         existing_sources = subprocess.check_output(["pactl", "list", "short", "sources"], text=True)
         if MIC_BUS_NAME in existing_sources:
             return True
-        subprocess.run(
-            ["pactl", "load-module", "module-null-sink", f"sink_name={MIC_BUS_SINK}"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        default_sink = subprocess.check_output(["pactl", "get-default-sink"], text=True).strip()
+        if not default_sink:
+            print("[WARN] Could not detect default sink for microphone bus.")
+            return False
         subprocess.run(
             [
                 "pactl",
                 "load-module",
                 "module-remap-source",
-                f"master={MIC_BUS_SINK}.monitor",
+                f"master={default_sink}.monitor",
                 f"source_name={MIC_BUS_NAME}",
                 f"source_properties=device.description={MIC_BUS_NAME}",
             ],
@@ -212,11 +225,8 @@ def launch_scrcpy(serial, cfg):
             cmd.append("--audio-source=mic")
         else:
             print("[WARN] Microphone is not supported by current scrcpy version.")
-    launch_env = dict(os.environ)
-    if microphone_bus and ensure_microphone_bus(microphone_bus):
-        # Route Android microphone/audio stream into the dedicated virtual sink.
-        launch_env["PULSE_SINK"] = MIC_BUS_SINK
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=launch_env)
+    ensure_microphone_bus(microphone_bus)
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=dict(os.environ))
 
 
 def render_menu(opts, idx, width):

@@ -78,10 +78,10 @@ class AudioConfigTests(unittest.TestCase):
     @patch("menu.ensure_microphone_bus", return_value=True)
     @patch("menu.scrcpy_supports_microphone", return_value=False)
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_sets_pulse_sink_when_bus_ready(self, mock_popen, _mic_support, _bus):
+    def test_launch_scrcpy_uses_default_env_when_bus_ready(self, mock_popen, _mic_support, _bus):
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": False, "microphone_bus": True})
         env = mock_popen.call_args.kwargs["env"]
-        self.assertEqual(env.get("PULSE_SINK"), menu.MIC_BUS_SINK)
+        self.assertNotIn("PULSE_SINK", env)
 
 
 if __name__ == "__main__":

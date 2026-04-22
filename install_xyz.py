@@ -353,7 +353,7 @@ def open_initial_menu(os_name: str, install_dir: Path, prechecked_status: str | 
                 "--",
                 "bash",
                 "-lc",
-                f"{env_prefix}bash \"{launcher}\"",
+                f"{env_prefix}XYZ_LAUNCHER_WINDOW=1 bash \"{launcher}\"",
             ],
             check=False,
         )

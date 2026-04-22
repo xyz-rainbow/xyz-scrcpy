@@ -111,7 +111,7 @@ Expected:
 4. Press `RESTART`.
 
 Expected:
-- Linux with `pactl`: app attempts to create/reuse `xyz-mic-input` and route scrcpy stream through that virtual sink.
+- Linux with `pactl`: app attempts to create/reuse `xyz-mic-input` as remapped source from default sink monitor (without creating an extra dedicated virtual output sink).
 - Windows: app warns and expects an external virtual cable setup (for example VB-CABLE), then manual routing to `xyz-mic-input`.
 - Missing stack/tools: warning shown, no crash.
 

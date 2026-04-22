@@ -9,6 +9,32 @@ LOG_FILE="$REPO_DIR/config/check.log"
 FULL_LOG_FILE="$REPO_DIR/config/full-check.log"
 FULL_PID_FILE="/tmp/xyz_full_checks.pid"
 
+open_detached_menu_terminal() {
+    if [ "${XYZ_LAUNCHER_WINDOW:-0}" = "1" ]; then
+        return 1
+    fi
+    if [ "${XYZ_SKIP_MENU_EXEC:-0}" = "1" ]; then
+        return 1
+    fi
+    if [ "$(uname -s)" != "Linux" ]; then
+        return 1
+    fi
+    if [ -z "${DISPLAY:-}" ] || [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+        return 1
+    fi
+    if ! command -v gnome-terminal >/dev/null 2>&1; then
+        return 1
+    fi
+
+    gnome-terminal \
+        --hide-menubar \
+        --geometry=70x29 \
+        --title="XYZ Launcher" \
+        -- \
+        bash -lc "XYZ_LAUNCHER_WINDOW=1 bash \"$0\""
+    return 0
+}
+
 start_background_full_checks() {
     if [ -f "$FULL_PID_FILE" ]; then
         old_pid="$(cat "$FULL_PID_FILE" 2>/dev/null || true)"
@@ -21,6 +47,10 @@ start_background_full_checks() {
         echo $! > "$FULL_PID_FILE"
     ) >/dev/null 2>&1
 }
+
+if open_detached_menu_terminal; then
+    exit 0
+fi
 
 if [ "${XYZ_CHECKS_ALREADY_DONE:-0}" = "1" ]; then
     status="${XYZ_CHECKS_STATUS:-PASS}"
