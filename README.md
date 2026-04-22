@@ -153,10 +153,13 @@ python3 install_xyz.py --action uninstall --yes
 - If checks fail:
   - automatic repair is executed (`repair_xyz.sh`),
   - checks are re-run.
+- Auto-repair logs include start/end markers, elapsed time, and exit code.
 - If still failing:
   - status becomes `FAIL_OPEN`,
+  - optional prompt to open a prefilled GitHub issue page in the browser,
   - user is prompted `Open menu anyway despite errors? (Y/n)`.
 - `config/check.log` is generated and includes GitHub Issues reporting guidance.
+- `config/check.log` includes time log entries (start/end/elapsed seconds) for each check run.
 - `config/full-check.log` stores background full-suite results.
 - If GitHub issue creation is not possible (requires login), logs can be sent by email to `rainbow@rainbowtechnology.xyz`.
 

@@ -42,7 +42,7 @@ class ShellFlowTests(unittest.TestCase):
         proc = self.run_script(
             LAUNCH_SCRIPT,
             {"XYZ_TEST_MODE": "1", "XYZ_TEST_SCENARIO": "fail", "XYZ_SKIP_MENU_EXEC": "1"},
-            input_text="n\n",
+            input_text="n\nn\n",
         )
         self.assertNotEqual(proc.returncode, 0)
         combined = (proc.stdout or "") + (proc.stderr or "")
@@ -52,7 +52,7 @@ class ShellFlowTests(unittest.TestCase):
         proc = self.run_script(
             LAUNCH_SCRIPT,
             {"XYZ_TEST_MODE": "1", "XYZ_TEST_SCENARIO": "fail", "XYZ_SKIP_MENU_EXEC": "1"},
-            input_text="y\n",
+            input_text="n\ny\n",
         )
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Test mode: menu execution skipped.", proc.stdout)

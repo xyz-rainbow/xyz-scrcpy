@@ -321,7 +321,7 @@ def run_post_install_checks(install_dir: Path) -> tuple[str, str]:
     log_path = install_dir / "config" / "check.log"
     summary = f"Check result: {status_code}"
     if log_path.exists():
-        summary += f" | log: {log_path}"
+        summary += " | log: ./config/check.log"
     return status_code, summary
 
 
