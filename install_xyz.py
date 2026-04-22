@@ -525,7 +525,7 @@ def main() -> int:
                 remove_files = True
                 remove_repo_copy = False
             else:
-                remove_files = ask_yes_no("Delete installed app files/repository copy", default_yes=False)
+                remove_files = ask_yes_no("Delete installed app files", default_yes=False)
                 remove_repo_copy = ask_yes_no("Delete current repository copy", default_yes=False)
             do_uninstall(
                 paths,

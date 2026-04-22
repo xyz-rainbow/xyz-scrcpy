@@ -146,9 +146,8 @@ python3 install_xyz.py --action uninstall --yes
 - Alias launcher executes `bin/launch_with_checks.sh`.
 - Launcher runs `bin/check_and_repair.sh` unless installer already pre-ran checks.
 - Checks include:
-  - Python syntax checks,
-  - monitor shell syntax check,
-  - full unit test suite.
+  - quick path on alias launch: syntax checks only (Python + shell scripts),
+  - full unit test suite in background to avoid blocking startup.
 - Timeouts protect all major check/repair commands.
 - If checks fail:
   - automatic repair is executed (`repair_xyz.sh`),
@@ -157,6 +156,8 @@ python3 install_xyz.py --action uninstall --yes
   - status becomes `FAIL_OPEN`,
   - user is prompted `Open menu anyway despite errors? (Y/n)`.
 - `config/check.log` is generated and includes GitHub Issues reporting guidance.
+- `config/full-check.log` stores background full-suite results.
+- If GitHub issue creation is not possible (requires login), logs can be sent by email to `rainbow@rainbowtechnology.xyz`.
 
 ### Installer and uninstaller capabilities
 
