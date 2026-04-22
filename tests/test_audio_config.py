@@ -30,6 +30,10 @@ class AudioConfigTests(unittest.TestCase):
         self.assertEqual(cfg["audio_target"], "host")
         self.assertEqual(cfg["sound"], "output")
 
+    def test_normalize_audio_preferences_forces_host_when_active_recall(self):
+        cfg = menu.normalize_audio_preferences({"audio_target": "device", "active_recall": True})
+        self.assertEqual(cfg["audio_target"], "host")
+
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=False)
     @patch("menu.subprocess.Popen")
@@ -49,6 +53,15 @@ class AudioConfigTests(unittest.TestCase):
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=True)
     @patch("menu.subprocess.Popen")
+    def test_launch_scrcpy_forces_host_when_active_recall_on(self, mock_popen, _mic_support, _bus):
+        menu.launch_scrcpy("ABC123", {"audio_target": "device", "active_recall": True, "microphone_bus": False})
+        args = mock_popen.call_args[0][0]
+        self.assertNotIn("--no-audio", args)
+        self.assertIn("--audio-source=mic", args)
+
+    @patch("menu.ensure_microphone_bus")
+    @patch("menu.scrcpy_supports_microphone", return_value=True)
+    @patch("menu.subprocess.Popen")
     def test_launch_scrcpy_adds_mic_flag_when_supported(self, mock_popen, _mic_support, _bus):
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": True, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
@@ -61,6 +74,14 @@ class AudioConfigTests(unittest.TestCase):
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": True, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertNotIn("--audio-source=mic", args)
+
+    @patch("menu.ensure_microphone_bus", return_value=True)
+    @patch("menu.scrcpy_supports_microphone", return_value=False)
+    @patch("menu.subprocess.Popen")
+    def test_launch_scrcpy_sets_pulse_sink_when_bus_ready(self, mock_popen, _mic_support, _bus):
+        menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": False, "microphone_bus": True})
+        env = mock_popen.call_args.kwargs["env"]
+        self.assertEqual(env.get("PULSE_SINK"), menu.MIC_BUS_SINK)
 
 
 if __name__ == "__main__":

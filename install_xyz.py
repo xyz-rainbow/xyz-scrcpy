@@ -348,7 +348,7 @@ def open_initial_menu(os_name: str, install_dir: Path, prechecked_status: str | 
             [
                 "gnome-terminal",
                 "--hide-menubar",
-                "--geometry=70x26",
+                "--geometry=70x29",
                 "--title=XYZ Initial Menu",
                 "--",
                 "bash",

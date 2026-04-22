@@ -39,6 +39,7 @@ LOCK_PATH = "/tmp/xyz_menu.lock"
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
 LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
+MIC_BUS_SINK = f"{MIC_BUS_NAME}-sink"
 
 
 def get_key():
@@ -123,6 +124,14 @@ def has_audio_pending(cfg):
     )
 
 
+def normalize_audio_preferences(cfg):
+    normalized = dict(cfg)
+    if bool(normalized.get("active_recall", False)) and str(normalized.get("audio_target", "host")).lower() == "device":
+        # Active Recall uses Android microphone capture, which requires host-side audio enabled.
+        normalized["audio_target"] = "host"
+    return normalized
+
+
 def list_devices():
     try:
         raw = subprocess.check_output(["adb", "devices"], text=True).splitlines()
@@ -150,21 +159,23 @@ def scrcpy_supports_microphone():
 
 def ensure_microphone_bus(enabled):
     if not enabled:
-        return True
+        return False
+    if sys.platform.startswith("win"):
+        print("[WARN] Windows microphone bus requires a virtual audio cable (for example VB-CABLE).")
+        print(f"[WARN] Configure that virtual input/output as '{MIC_BUS_NAME}' manually.")
+        return False
     if sys.platform != "linux":
-        print("[WARN] Microphone bus is currently supported on Linux only.")
+        print("[WARN] Microphone bus is currently implemented on Linux only.")
         return False
     if shutil.which("pactl") is None:
         print("[WARN] microphone_bus requires 'pactl' (PulseAudio/PipeWire).")
         return False
-    sink_name = f"{MIC_BUS_NAME}-sink"
-    source_name = MIC_BUS_NAME
     try:
         existing_sources = subprocess.check_output(["pactl", "list", "short", "sources"], text=True)
-        if source_name in existing_sources:
+        if MIC_BUS_NAME in existing_sources:
             return True
         subprocess.run(
-            ["pactl", "load-module", "module-null-sink", f"sink_name={sink_name}"],
+            ["pactl", "load-module", "module-null-sink", f"sink_name={MIC_BUS_SINK}"],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -174,8 +185,8 @@ def ensure_microphone_bus(enabled):
                 "pactl",
                 "load-module",
                 "module-remap-source",
-                f"master={sink_name}.monitor",
-                f"source_name={source_name}",
+                f"master={MIC_BUS_SINK}.monitor",
+                f"source_name={MIC_BUS_NAME}",
                 f"source_properties=device.description={MIC_BUS_NAME}",
             ],
             check=False,
@@ -189,6 +200,7 @@ def ensure_microphone_bus(enabled):
 
 
 def launch_scrcpy(serial, cfg):
+    cfg = normalize_audio_preferences(cfg)
     audio_target = str(cfg.get("audio_target", "host")).lower()
     active_recall = bool(cfg.get("active_recall", False))
     microphone_bus = bool(cfg.get("microphone_bus", False))
@@ -200,8 +212,11 @@ def launch_scrcpy(serial, cfg):
             cmd.append("--audio-source=mic")
         else:
             print("[WARN] Microphone is not supported by current scrcpy version.")
-    ensure_microphone_bus(microphone_bus)
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    launch_env = dict(os.environ)
+    if microphone_bus and ensure_microphone_bus(microphone_bus):
+        # Route Android microphone/audio stream into the dedicated virtual sink.
+        launch_env["PULSE_SINK"] = MIC_BUS_SINK
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=launch_env)
 
 
 def render_menu(opts, idx, width):
@@ -330,6 +345,7 @@ def settings_screen(cfg):
                 temp_cfg["pause_on_exit"] = not temp_cfg["pause_on_exit"]
             elif name == "APPLY":
                 temp_cfg["command_alias"] = normalize_alias(temp_cfg["command_alias"])
+                temp_cfg = normalize_audio_preferences(temp_cfg)
                 save_config(temp_cfg)
                 sync_alias_launcher(temp_cfg["command_alias"])
                 return load_config(), "apply"
@@ -395,6 +411,7 @@ def main():
                     if not target_serial and devices:
                         target_serial = devices[0]["serial"]
                     if target_serial:
+                        cfg = normalize_audio_preferences(cfg)
                         subprocess.run(
                             ["pkill", "-f", f"scrcpy.*-s[[:space:]]*{target_serial}"],
                             check=False,
@@ -412,6 +429,7 @@ def main():
                     continue
                 match = re.search(r"\((.*?)\)$", selected)
                 device_serial = match.group(1) if match else selected
+                cfg = normalize_audio_preferences(cfg)
                 launch_scrcpy(device_serial, cfg)
                 cfg["applied_audio_target"] = cfg.get("audio_target", "host")
                 cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))

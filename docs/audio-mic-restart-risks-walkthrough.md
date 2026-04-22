@@ -14,9 +14,10 @@ This document describes the current behavior introduced for:
 
 ## Risks
 
-### 1) scrcpy microphone feature compatibility
+### 1) Android microphone capture compatibility (Active Recall)
 
-- Microphone forwarding depends on installed `scrcpy` capabilities.
+- `active_recall` is designed for direct Android microphone capture.
+- Android microphone forwarding depends on installed `scrcpy` capabilities.
 - The app detects support at runtime using `scrcpy --help`.
 - If unsupported, launch continues without crashing and prints a warning.
 
@@ -40,8 +41,9 @@ Mitigation:
 
 ### 3) OS-specific behavior
 
-- Virtual bus creation is currently Linux-only best effort.
-- Non-Linux environments keep normal launch behavior and only show warnings.
+- Virtual bus auto-creation is currently Linux-only best effort.
+- Windows path is supported as guided fallback: use a virtual cable tool and map it manually.
+- Other non-Linux environments keep normal launch behavior and only show warnings.
 
 Impact:
 - Feature parity for `microphone_bus` is not identical across OSes.
@@ -97,8 +99,9 @@ Expected:
 4. Press `RESTART`.
 
 Expected:
-- If supported: launch includes mic flag (`--audio-source=mic`).
+- If supported: launch includes mic flag (`--audio-source=mic`) and captures mic from Android.
 - If unsupported: warning is shown, launch still succeeds.
+- If `Audio target` was `DEVICE`, apply flow normalizes it to `HOST` for compatibility.
 
 ### C) Enable virtual microphone bus (`microphone_bus`)
 
@@ -108,7 +111,8 @@ Expected:
 4. Press `RESTART`.
 
 Expected:
-- Linux with `pactl`: app attempts to create/reuse `xyz-mic-input`.
+- Linux with `pactl`: app attempts to create/reuse `xyz-mic-input` and route scrcpy stream through that virtual sink.
+- Windows: app warns and expects an external virtual cable setup (for example VB-CABLE), then manual routing to `xyz-mic-input`.
 - Missing stack/tools: warning shown, no crash.
 
 ### D) Visual dirty-state guidance

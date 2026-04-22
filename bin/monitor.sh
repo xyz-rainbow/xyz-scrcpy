@@ -172,10 +172,10 @@ evaluate_test_pause_state() {
 compute_terminal_geometry() {
     local device_count="$1"
     local cols=70
-    local base_rows=26
+    local base_rows=29
     local extra_rows=0
 
-    # Keep two extra lines to avoid clipping header,
+    # Keep three extra lines to avoid clipping header,
     # then add one line per additional detected device.
     if [ "$device_count" -gt 1 ]; then
         extra_rows=$((device_count - 1))

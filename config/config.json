@@ -1,6 +1,13 @@
 {
   "command_alias": "scrcpy",
+  "audio_target": "host",
   "sound": "output",
+  "active_recall": false,
+  "microphone_bus": false,
+  "applied_audio_target": "host",
+  "applied_active_recall": false,
+  "applied_microphone_bus": false,
+  "last_device_serial": "",
   "auto_start": false,
   "auto_discover": true,
   "resolution": "1080p",

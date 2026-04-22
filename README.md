@@ -3,7 +3,7 @@
 Interactive Android device launcher and monitor on top of `scrcpy`, built for users who want an auto-start background service plus a configurable terminal UI.
 
 <p align="center">
-  <img src="assets/actual_app-status.png" alt="Current real-world view of the app" width="360" />
+  <img src="assets/current_app_2026-04-22-21-47-25.png" alt="Current real-world view of the app" width="360" />
 </p>
 <p align="center"><em>Current app appearance (real usage screenshot)</em></p>
 
@@ -95,14 +95,24 @@ python3 install_xyz.py --action uninstall --yes
   - Sanitized to safe command characters.
   - Synced automatically via installer `sync-alias` flow.
 - `Audio target`: `HOST` / `DEVICE`.
-- `Active Recall`: `ON` / `OFF` (uses microphone forwarding when supported by installed scrcpy).
-- `Microphone Bus`: `ON` / `OFF` (creates/reuses virtual input bus `xyz-mic-input` on Linux when audio stack tools are available).
+- `Active Recall`: `ON` / `OFF` (captures microphone directly from Android via scrcpy when supported).
+- `Microphone Bus`: `ON` / `OFF` (prioritizes routing to virtual bus `xyz-mic-input`; Linux auto-setup via `pactl`, Windows requires external virtual cable setup).
 - `Auto-start`: enables/disables monitor auto-launch behavior.
 - `Auto-Discover`: controls automatic reaction to device connection events.
 - `Pause on EXIT`: toggle between paused and immediate-start behavior.
 - `Pause duration (minutes)`: minimum 1 minute, adjustable in settings.
 - `[Apply]` and `[Cancel]` actions in settings.
 - `RESTART` action in main menu to re-apply current audio/microphone settings to active scrcpy flow.
+
+### Audio and microphone rules
+
+- `active_recall=ON` means Android microphone capture path (not host microphone capture).
+- Android microphone capture is attempted with scrcpy microphone flag support (`--audio-source=mic`).
+- If `active_recall=ON` and `audio_target=DEVICE`, config is normalized to `audio_target=HOST` for compatibility.
+- If current scrcpy version does not support Android microphone capture, app falls back safely with warning (no crash).
+- With `microphone_bus=ON`, app prioritizes virtual bus routing through `xyz-mic-input`.
+  - Linux: attempts automatic setup via `pactl` and routes using `PULSE_SINK`.
+  - Windows: shows guided fallback notice; requires external virtual audio cable setup (for example VB-CABLE) and manual routing.
 
 ### Pause and reconnect contract
 
@@ -239,6 +249,7 @@ systemctl --user status scrcpy-auto.service --no-pager -n 20
 
 These screenshots are kept as legacy visual references from earlier UI iterations:
 
+![Legacy former top screenshot](assets/actual_app-status.png)
 ![Legacy terminal view](assets/terminal_main.png)
 ![Legacy monitor view](assets/terminal_monitor.png)
 ![Legacy branding preview](assets/rainbow_tech.png)
