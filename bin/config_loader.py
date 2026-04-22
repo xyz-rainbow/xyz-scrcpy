@@ -8,6 +8,7 @@ DEFAULT_CONFIG = {
     "command_alias": "xyz-scrcpy",
     "sound": "output",
     "auto_start": True,
+    "auto_discover": True,
     "resolution": "1080p",
     "exit_pause_minutes": 1440,
     "pause_on_exit": False,
@@ -32,6 +33,7 @@ def _normalize_config(raw_cfg):
         cfg["auto_start"] = bool(raw_cfg.get("autostart"))
 
     cfg["auto_start"] = bool(cfg.get("auto_start", True))
+    cfg["auto_discover"] = bool(cfg.get("auto_discover", True))
     cfg["pause_on_exit"] = bool(cfg.get("pause_on_exit", False))
     cfg["pause_active"] = bool(cfg.get("pause_active", False))
     cfg["pause_wait_reconnect"] = bool(cfg.get("pause_wait_reconnect", False))

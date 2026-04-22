@@ -14,10 +14,13 @@ def run_monitor_test(env_overrides):
         {
             "MONITOR_TEST_MODE": "1",
             "MONITOR_RUN_ONCE": "1",
-            "TEST_DEVICE_SERIAL": "ABC123",
-            "TEST_DEVICE_COUNT": "1",
+            "TEST_CURR_SERIALS": "ABC123",
+            "TEST_PREV_SERIALS": "",
             "TEST_AUTO_START": "true",
+            "TEST_AUTO_DISCOVER": "true",
             "TEST_PAUSE_ACTIVE": "false",
+            "TEST_PAUSE_WAIT_RECONNECT": "false",
+            "TEST_PAUSE_SEEN_DISCONNECT": "false",
         }
     )
     env.update(env_overrides)
@@ -48,9 +51,51 @@ class MonitorBehaviorTests(unittest.TestCase):
         self.assertNotIn("OPEN_TERMINAL", proc.stdout)
 
     def test_does_not_open_when_pause_active(self):
-        proc = run_monitor_test({"TEST_PAUSE_ACTIVE": "true"})
+        proc = run_monitor_test({"TEST_PAUSE_ACTIVE": "true", "TEST_PAUSE_WAIT_RECONNECT": "false"})
         self.assertEqual(proc.returncode, 0)
         self.assertNotIn("OPEN_TERMINAL", proc.stdout)
+
+    def test_pause_reconnect_resumes_when_auto_discover_on(self):
+        proc = run_monitor_test(
+            {
+                "TEST_PAUSE_ACTIVE": "true",
+                "TEST_PAUSE_WAIT_RECONNECT": "true",
+                "TEST_PAUSE_SEEN_DISCONNECT": "true",
+                "TEST_PREV_SERIALS": "ABC123",
+                "TEST_CURR_SERIALS": "ABC123",
+                "TEST_AUTO_DISCOVER": "true",
+            }
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("OPEN_TERMINAL", proc.stdout)
+
+    def test_pause_reconnect_does_not_resume_when_auto_discover_off(self):
+        proc = run_monitor_test(
+            {
+                "TEST_PAUSE_ACTIVE": "true",
+                "TEST_PAUSE_WAIT_RECONNECT": "true",
+                "TEST_PAUSE_SEEN_DISCONNECT": "true",
+                "TEST_PREV_SERIALS": "ABC123",
+                "TEST_CURR_SERIALS": "ABC123",
+                "TEST_AUTO_DISCOVER": "false",
+            }
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertNotIn("OPEN_TERMINAL", proc.stdout)
+
+    def test_reconnect_with_different_serial_resumes(self):
+        proc = run_monitor_test(
+            {
+                "TEST_PAUSE_ACTIVE": "true",
+                "TEST_PAUSE_WAIT_RECONNECT": "true",
+                "TEST_PAUSE_SEEN_DISCONNECT": "false",
+                "TEST_PREV_SERIALS": "OLD001",
+                "TEST_CURR_SERIALS": "NEW999",
+                "TEST_AUTO_DISCOVER": "true",
+            }
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("OPEN_TERMINAL", proc.stdout)
 
 
 if __name__ == "__main__":

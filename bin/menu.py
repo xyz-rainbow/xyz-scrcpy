@@ -31,6 +31,7 @@ RED, GREEN, MAGENTA, ORANGE, WHITE, RESET = (
     "\033[37m",
     "\033[0m",
 )
+NEON_PINK = "\033[38;5;213m"
 
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -137,7 +138,7 @@ def render_menu(opts, idx, width):
     border = "=" * width
     out = [
         center_line("[SPACE] [ENTER] [ESC]".center(width), width),
-        center_line(f"{GREEN}{border}{RESET}", width),
+        center_line(f"{RED}{border}{RESET}", width),
         "",
     ]
     for line in LOGO:
@@ -154,7 +155,7 @@ def render_menu(opts, idx, width):
         [
             "",
             center_line(f"{GREEN}{border}{RESET}", width),
-            center_line(f"{MAGENTA}{BRAND_NAME.center(width)}{RESET}", width),
+            center_line(f"{NEON_PINK}[{BRAND_NAME}]".center(width) + f"{RESET}", width),
             center_line(f"{GREEN}{border}{RESET}", width),
         ]
     )
@@ -165,7 +166,16 @@ def settings_screen(cfg):
     temp_cfg = dict(cfg)
     temp_cfg["command_alias"] = normalize_alias(temp_cfg.get("command_alias", "xyz-scrcpy"))
     field_idx = 0
-    fields = ["command_alias", "sound", "auto_start", "pause_on_exit", "exit_pause_minutes", "APPLY", "CANCEL"]
+    fields = [
+        "command_alias",
+        "sound",
+        "auto_start",
+        "auto_discover",
+        "pause_on_exit",
+        "exit_pause_minutes",
+        "APPLY",
+        "CANCEL",
+    ]
     while True:
         width = terminal_width()
         border = "=" * width
@@ -180,6 +190,7 @@ def settings_screen(cfg):
             f"Command alias: {temp_cfg['command_alias']}",
             f"Sound: {temp_cfg['sound']}",
             f"Auto-start: {'ON' if temp_cfg['auto_start'] else 'OFF'}",
+            f"[Auto-Discover] [{'ON' if temp_cfg.get('auto_discover', True) else 'OFF'}]",
             f"[{pause_toggle_label}] on EXIT",
             f"Pause duration (minutes): {temp_cfg['exit_pause_minutes']}",
             "[Apply]",
@@ -205,6 +216,8 @@ def settings_screen(cfg):
                 temp_cfg["sound"] = "off" if temp_cfg["sound"] == "output" else "output"
             elif name == "auto_start":
                 temp_cfg["auto_start"] = not temp_cfg["auto_start"]
+            elif name == "auto_discover":
+                temp_cfg["auto_discover"] = not bool(temp_cfg.get("auto_discover", True))
             elif name == "pause_on_exit":
                 temp_cfg["pause_on_exit"] = not temp_cfg["pause_on_exit"]
             elif name == "exit_pause_minutes":
@@ -223,6 +236,8 @@ def settings_screen(cfg):
                 temp_cfg["command_alias"] = normalize_alias(entered)
             elif name == "auto_start":
                 temp_cfg["auto_start"] = not temp_cfg["auto_start"]
+            elif name == "auto_discover":
+                temp_cfg["auto_discover"] = not bool(temp_cfg.get("auto_discover", True))
             elif name == "pause_on_exit":
                 temp_cfg["pause_on_exit"] = not temp_cfg["pause_on_exit"]
             elif name == "APPLY":

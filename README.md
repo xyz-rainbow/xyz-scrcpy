@@ -50,6 +50,7 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
    - Prompt: `Enable service (Y/n)`.
    - Prompt: `Run tests and view log (Y/n)`.
    - Initial mini terminal launch at the end.
+   - Fail-open confirmation if checks still fail after repair.
 
 4. Launch command:
    - Use the alias you selected during install.
@@ -80,12 +81,23 @@ python3 install_xyz.py --action uninstall --yes
 ## Settings
 
 From in-app `SETTINGS` you can configure:
-- Command alias
-- Sound mode
-- Auto-start behavior
-- Pause-on-exit behavior and duration (minutes)
+- `Command alias`: command name used to launch the app manually.
+- `Sound`: `output` or `off` for scrcpy audio behavior.
+- `Auto-start`: allows monitor automation flow when service is active.
+- `Auto-Discover`: when ON, monitor reacts to new device connection events.
+- `Pause on EXIT`: toggles pause behavior when leaving menu with `EXIT`.
+- `Pause duration (minutes)`: timeout-based resume window for paused mode.
 
 Applying alias changes syncs the launcher automatically via installer sync logic.
+
+### Pause and reconnect contract
+
+- `Pause on EXIT = ON` stores a paused state.
+- With `Auto-Discover = ON`, pause is lifted on a valid reconnect event:
+  - same serial reconnect after disconnect, or
+  - a different serial appears.
+- With `Auto-Discover = OFF`, reconnect does not auto-resume popup behavior.
+- Manual launcher alias always remains available regardless of auto-discover.
 
 ## Repository Layout
 

@@ -2,6 +2,7 @@
   "command_alias": "scrcpy",
   "sound": "output",
   "auto_start": false,
+  "auto_discover": true,
   "resolution": "1080p",
   "exit_pause_minutes": 1440,
   "pause_on_exit": false,

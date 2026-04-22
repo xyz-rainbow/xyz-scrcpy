@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import install_xyz
 
@@ -51,6 +52,39 @@ class InstallerTests(unittest.TestCase):
             new_launcher = install_xyz.launcher_path("linux", launcher_dir, "new-alias")
             self.assertTrue(new_launcher.exists())
             self.assertFalse(old_launcher.exists())
+
+    def test_do_install_always_runs_clean_uninstall_first(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            paths = {
+                "install_dir": root / "app",
+                "launcher_dir": root / "bin",
+                "service_file": root / "svc",
+            }
+            src = root / "src"
+            src.mkdir()
+            (src / "dummy.txt").write_text("x", encoding="utf-8")
+            paths["launcher_dir"].mkdir(parents=True)
+
+            with (
+                patch("install_xyz.do_uninstall") as mock_uninstall,
+                patch("install_xyz.copy_project") as mock_copy,
+                patch("install_xyz.check_dependencies"),
+                patch("install_xyz.install_service"),
+                patch("install_xyz.open_initial_menu"),
+                patch("install_xyz.read_installed_alias", return_value="xyz-scrcpy"),
+                patch("install_xyz.write_launcher"),
+                patch("install_xyz.save_alias_to_config"),
+            ):
+                install_xyz.do_install(paths, src, "linux", "xyz-scrcpy", True, False)
+                mock_uninstall.assert_called_once()
+                mock_copy.assert_called_once()
+
+    def test_ask_yes_no_defaults_and_values(self):
+        with patch("builtins.input", return_value=""):
+            self.assertTrue(install_xyz.ask_yes_no("Enable service", default_yes=True))
+        with patch("builtins.input", return_value="n"):
+            self.assertFalse(install_xyz.ask_yes_no("Enable service", default_yes=True))
 
 
 if __name__ == "__main__":
