@@ -7,7 +7,14 @@ CHECK_SCRIPT="$SCRIPT_DIR/check_and_repair.sh"
 MENU_SCRIPT="$SCRIPT_DIR/menu.py"
 LOG_FILE="$REPO_DIR/config/check.log"
 
-status="$(bash "$CHECK_SCRIPT" | tail -n 1)"
+if [ "${XYZ_CHECKS_ALREADY_DONE:-0}" = "1" ]; then
+    status="${XYZ_CHECKS_STATUS:-PASS}"
+    echo "[INFO] Reusing installer check result: $status"
+else
+    echo "[INFO] Running automated checks (this may take around 45 seconds)..."
+    status="$(bash "$CHECK_SCRIPT" | tail -n 1)"
+fi
+
 case "$status" in
     PASS|PASS_AFTER_REPAIR)
         ;;
@@ -36,4 +43,5 @@ if [ "${XYZ_SKIP_MENU_EXEC:-0}" = "1" ]; then
     exit 0
 fi
 
+echo "[INFO] Launching interactive menu..."
 exec python3 "$MENU_SCRIPT"

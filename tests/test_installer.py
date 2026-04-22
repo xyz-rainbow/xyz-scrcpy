@@ -86,6 +86,52 @@ class InstallerTests(unittest.TestCase):
         with patch("builtins.input", return_value="n"):
             self.assertFalse(install_xyz.ask_yes_no("Enable service", default_yes=True))
 
+    def test_uninstall_removes_managed_orphan_launchers(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            install_dir = root / "app"
+            launcher_dir = root / "bin"
+            service_file = root / "svc"
+            install_dir.mkdir(parents=True)
+            launcher_dir.mkdir(parents=True)
+            (install_dir / "bin").mkdir(parents=True)
+            (install_dir / "bin" / "launch_with_checks.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            (install_dir / "config").mkdir(parents=True)
+            (install_dir / "config" / "config.json").write_text(
+                json.dumps({"command_alias": "main-alias"}),
+                encoding="utf-8",
+            )
+
+            managed_primary = launcher_dir / "main-alias"
+            managed_orphan = launcher_dir / "old-alias"
+            unmanaged = launcher_dir / "not-related"
+            marker = str(install_dir / "bin" / "launch_with_checks.sh")
+            managed_primary.write_text(f"bash \"{marker}\"\n", encoding="utf-8")
+            managed_orphan.write_text(f"bash \"{marker}\"\n", encoding="utf-8")
+            unmanaged.write_text("echo hello\n", encoding="utf-8")
+
+            paths = {
+                "install_dir": install_dir,
+                "launcher_dir": launcher_dir,
+                "service_file": service_file,
+            }
+
+            with patch("install_xyz.stop_service"), patch("install_xyz.uninstall_service"):
+                install_xyz.do_uninstall(paths, "linux")
+
+            self.assertFalse(install_dir.exists())
+            self.assertFalse(managed_primary.exists())
+            self.assertFalse(managed_orphan.exists())
+            self.assertTrue(unmanaged.exists())
+
+    def test_safe_delete_repo_copy_guarded(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            (repo / "install_xyz.py").write_text("print('x')\n", encoding="utf-8")
+            self.assertTrue(install_xyz._safe_delete_repo_copy(repo))
+            self.assertFalse(repo.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
