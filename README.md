@@ -95,11 +95,14 @@ python3 install_xyz.py --action uninstall --yes
   - Sanitized to safe command characters.
   - Synced automatically via installer `sync-alias` flow.
 - `Audio target`: `HOST` / `DEVICE`.
+- `Active Recall`: `ON` / `OFF` (uses microphone forwarding when supported by installed scrcpy).
+- `Microphone Bus`: `ON` / `OFF` (creates/reuses virtual input bus `xyz-mic-input` on Linux when audio stack tools are available).
 - `Auto-start`: enables/disables monitor auto-launch behavior.
 - `Auto-Discover`: controls automatic reaction to device connection events.
 - `Pause on EXIT`: toggle between paused and immediate-start behavior.
 - `Pause duration (minutes)`: minimum 1 minute, adjustable in settings.
 - `[Apply]` and `[Cancel]` actions in settings.
+- `RESTART` action in main menu to re-apply current audio/microphone settings to active scrcpy flow.
 
 ### Pause and reconnect contract
 
@@ -190,7 +193,10 @@ python3 install_xyz.py --action uninstall --yes
 | Interactive menu rendering and navigation | `bin/menu.py` | Dynamic width, centered layout, key handling |
 | Device discovery and labels | `bin/menu.py` | Uses `adb devices` + model lookup |
 | Device launch with audio target | `bin/menu.py` | Starts `scrcpy` with `--no-audio` when target is `DEVICE` |
-| Settings editing (`Apply`/`Cancel`) | `bin/menu.py` | Includes alias, sound, auto flags, pause options |
+| Microphone forwarding capability check | `bin/menu.py` | Adds mic flag only when detected as supported by current `scrcpy` |
+| Virtual microphone bus (`xyz-mic-input`) | `bin/menu.py` | Linux-only best-effort setup via `pactl` with safe fallback |
+| Settings editing (`Apply`/`Cancel`) | `bin/menu.py` | Includes alias, audio/mic, auto flags, and pause options |
+| Restart-to-apply audio/mic settings | `bin/menu.py` | `RESTART` button highlights when pending changes exist |
 | Pause activation on exit | `bin/menu.py` | Persists pause state/timer in config |
 | Config defaults and normalization | `bin/config_loader.py` | Backward compatibility and type coercion |
 | Config persistence (`config.json`) | `bin/config_loader.py` | Atomic save via temp file replace |

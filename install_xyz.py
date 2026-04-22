@@ -304,6 +304,8 @@ def check_dependencies(os_name: str) -> None:
     if missing:
         print(f"Warning: Missing dependencies: {', '.join(missing)}")
         print("Installation will continue, but runtime may fail until dependencies are installed.")
+    if os_name == "linux" and shutil.which("pactl") is None:
+        print("Notice: 'pactl' not found. Microphone Bus feature (xyz-mic-input) will fallback gracefully.")
 
 
 def run_post_install_checks(install_dir: Path) -> tuple[str, str]:

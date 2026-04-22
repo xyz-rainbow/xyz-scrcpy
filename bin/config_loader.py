@@ -8,6 +8,12 @@ DEFAULT_CONFIG = {
     "command_alias": "xyz-scrcpy",
     "audio_target": "host",
     "sound": "output",
+    "active_recall": False,
+    "microphone_bus": False,
+    "applied_audio_target": "host",
+    "applied_active_recall": False,
+    "applied_microphone_bus": False,
+    "last_device_serial": "",
     "auto_start": True,
     "auto_discover": True,
     "resolution": "1080p",
@@ -37,6 +43,10 @@ def _normalize_config(raw_cfg):
 
     cfg["auto_start"] = bool(cfg.get("auto_start", True))
     cfg["auto_discover"] = bool(cfg.get("auto_discover", True))
+    cfg["active_recall"] = bool(cfg.get("active_recall", False))
+    cfg["microphone_bus"] = bool(cfg.get("microphone_bus", False))
+    cfg["applied_active_recall"] = bool(cfg.get("applied_active_recall", False))
+    cfg["applied_microphone_bus"] = bool(cfg.get("applied_microphone_bus", False))
     cfg["pause_on_exit"] = bool(cfg.get("pause_on_exit", False))
     cfg["pause_active"] = bool(cfg.get("pause_active", False))
     cfg["pause_wait_reconnect"] = bool(cfg.get("pause_wait_reconnect", False))
@@ -55,12 +65,17 @@ def _normalize_config(raw_cfg):
     if audio_target not in {"host", "device"}:
         audio_target = "host"
     cfg["audio_target"] = audio_target
+    applied_audio_target = str(cfg.get("applied_audio_target", audio_target)).strip().lower()
+    if applied_audio_target not in {"host", "device"}:
+        applied_audio_target = audio_target
+    cfg["applied_audio_target"] = applied_audio_target
 
     cfg["sound"] = str(cfg.get("sound", "output")).strip().lower()
     if cfg["sound"] not in {"output", "off"}:
         cfg["sound"] = "output"
     # Keep legacy key in sync during transition.
     cfg["sound"] = "off" if cfg["audio_target"] == "device" else "output"
+    cfg["last_device_serial"] = str(cfg.get("last_device_serial", "") or "")
     cfg["resolution"] = str(cfg.get("resolution", "1080p"))
     return cfg
 

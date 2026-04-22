@@ -37,6 +37,8 @@ ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 ROOT_DIR = Path(__file__).resolve().parent.parent
 LOCK_PATH = "/tmp/xyz_menu.lock"
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
+LIME = "\033[38;5;154m"
+MIC_BUS_NAME = "xyz-mic-input"
 
 
 def get_key():
@@ -111,6 +113,16 @@ def sync_alias_launcher(alias):
         return False
 
 
+def has_audio_pending(cfg):
+    return any(
+        [
+            str(cfg.get("audio_target", "host")) != str(cfg.get("applied_audio_target", "host")),
+            bool(cfg.get("active_recall", False)) != bool(cfg.get("applied_active_recall", False)),
+            bool(cfg.get("microphone_bus", False)) != bool(cfg.get("applied_microphone_bus", False)),
+        ]
+    )
+
+
 def list_devices():
     try:
         raw = subprocess.check_output(["adb", "devices"], text=True).splitlines()
@@ -127,10 +139,68 @@ def list_devices():
         return []
 
 
-def launch_scrcpy(serial, audio_target):
+def scrcpy_supports_microphone():
+    try:
+        output = subprocess.check_output(["scrcpy", "--help"], text=True, stderr=subprocess.STDOUT)
+    except (subprocess.SubprocessError, OSError):
+        return False
+    lowered = output.lower()
+    return "--audio-source" in lowered and "mic" in lowered
+
+
+def ensure_microphone_bus(enabled):
+    if not enabled:
+        return True
+    if sys.platform != "linux":
+        print("[WARN] Microphone bus is currently supported on Linux only.")
+        return False
+    if shutil.which("pactl") is None:
+        print("[WARN] microphone_bus requires 'pactl' (PulseAudio/PipeWire).")
+        return False
+    sink_name = f"{MIC_BUS_NAME}-sink"
+    source_name = MIC_BUS_NAME
+    try:
+        existing_sources = subprocess.check_output(["pactl", "list", "short", "sources"], text=True)
+        if source_name in existing_sources:
+            return True
+        subprocess.run(
+            ["pactl", "load-module", "module-null-sink", f"sink_name={sink_name}"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            [
+                "pactl",
+                "load-module",
+                "module-remap-source",
+                f"master={sink_name}.monitor",
+                f"source_name={source_name}",
+                f"source_properties=device.description={MIC_BUS_NAME}",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (subprocess.SubprocessError, OSError):
+        print("[WARN] Unable to initialize microphone bus.")
+        return False
+
+
+def launch_scrcpy(serial, cfg):
+    audio_target = str(cfg.get("audio_target", "host")).lower()
+    active_recall = bool(cfg.get("active_recall", False))
+    microphone_bus = bool(cfg.get("microphone_bus", False))
     cmd = ["scrcpy", "-s", serial, "--render-driver=software"]
     if audio_target == "device":
         cmd.append("--no-audio")
+    if active_recall:
+        if scrcpy_supports_microphone():
+            cmd.append("--audio-source=mic")
+        else:
+            print("[WARN] Microphone is not supported by current scrcpy version.")
+    ensure_microphone_bus(microphone_bus)
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -169,6 +239,8 @@ def settings_screen(cfg):
     fields = [
         "command_alias",
         "audio_target",
+        "active_recall",
+        "microphone_bus",
         "auto_start",
         "auto_discover",
         "pause_on_exit",
@@ -189,6 +261,8 @@ def settings_screen(cfg):
         rows = [
             f"Command alias: {temp_cfg['command_alias']}",
             f"Audio target: {temp_cfg.get('audio_target', 'host').upper()}",
+            f"Active Recall: {'ON' if temp_cfg.get('active_recall', False) else 'OFF'}",
+            f"Microphone Bus ({MIC_BUS_NAME}): {'ON' if temp_cfg.get('microphone_bus', False) else 'OFF'}",
             f"Auto-start: {'ON' if temp_cfg['auto_start'] else 'OFF'}",
             f"[Auto-Discover] [{'ON' if temp_cfg.get('auto_discover', True) else 'OFF'}]",
             f"[{pause_toggle_label}] on EXIT",
@@ -197,7 +271,11 @@ def settings_screen(cfg):
             "[Cancel]",
         ]
         for i, row in enumerate(rows):
+            name = fields[i]
             text = trunc_text(row, width - 4)
+            changed = name in temp_cfg and temp_cfg.get(name) != cfg.get(name)
+            if changed:
+                text = f"{RED}{text}{RESET}"
             lines.append(center_line((f"> {text}" if i == field_idx else f"  {text}"), width))
         lines.append("")
         lines.append(center_line("[LEFT/RIGHT] edit [ENTER] select/apply [ESC] back", width))
@@ -215,6 +293,10 @@ def settings_screen(cfg):
             if name == "audio_target":
                 current = str(temp_cfg.get("audio_target", "host")).lower()
                 temp_cfg["audio_target"] = "device" if current == "host" else "host"
+            elif name == "active_recall":
+                temp_cfg["active_recall"] = not bool(temp_cfg.get("active_recall", False))
+            elif name == "microphone_bus":
+                temp_cfg["microphone_bus"] = not bool(temp_cfg.get("microphone_bus", False))
             elif name == "auto_start":
                 temp_cfg["auto_start"] = not temp_cfg["auto_start"]
             elif name == "auto_discover":
@@ -229,6 +311,10 @@ def settings_screen(cfg):
             if name == "audio_target":
                 current = str(temp_cfg.get("audio_target", "host")).lower()
                 temp_cfg["audio_target"] = "device" if current == "host" else "host"
+            elif name == "active_recall":
+                temp_cfg["active_recall"] = not bool(temp_cfg.get("active_recall", False))
+            elif name == "microphone_bus":
+                temp_cfg["microphone_bus"] = not bool(temp_cfg.get("microphone_bus", False))
             elif name == "command_alias":
                 os.system("clear")
                 try:
@@ -277,7 +363,12 @@ def main():
             width = terminal_width()
             devices = list_devices()
             device_labels = [d["label"] for d in devices]
-            opts = device_labels + ["SETTINGS", "EXIT"]
+            restart_label = "RESTART"
+            if has_audio_pending(cfg):
+                restart_label = f"{LIME}RESTART{RESET}"
+            else:
+                restart_label = f"{RED}RESTART{RESET}"
+            opts = device_labels + ["SETTINGS", restart_label, "EXIT"]
             if idx >= len(opts):
                 idx = 0
 
@@ -299,8 +390,35 @@ def main():
                 if selected == "SETTINGS":
                     cfg, _ = settings_screen(cfg)
                     continue
+                if "RESTART" in selected:
+                    target_serial = cfg.get("last_device_serial")
+                    if not target_serial and devices:
+                        target_serial = devices[0]["serial"]
+                    if target_serial:
+                        subprocess.run(
+                            ["pkill", "-f", f"scrcpy.*-s[[:space:]]*{target_serial}"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        time.sleep(0.4)
+                        launch_scrcpy(target_serial, cfg)
+                        cfg["applied_audio_target"] = cfg.get("audio_target", "host")
+                        cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))
+                        cfg["applied_microphone_bus"] = bool(cfg.get("microphone_bus", False))
+                        cfg["last_device_serial"] = target_serial
+                        save_config(cfg)
+                        cfg = load_config()
+                    continue
                 match = re.search(r"\((.*?)\)$", selected)
-                launch_scrcpy(match.group(1) if match else selected, cfg.get("audio_target", "host"))
+                device_serial = match.group(1) if match else selected
+                launch_scrcpy(device_serial, cfg)
+                cfg["applied_audio_target"] = cfg.get("audio_target", "host")
+                cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))
+                cfg["applied_microphone_bus"] = bool(cfg.get("microphone_bus", False))
+                cfg["last_device_serial"] = device_serial
+                save_config(cfg)
+                cfg = load_config()
             elif key == "\x1b":
                 break
     finally:
