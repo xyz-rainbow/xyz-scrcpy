@@ -15,7 +15,8 @@ set -u
 
 PID_FILE="/tmp/xyz_monitor.pid"
 SERIAL_STATE_FILE="/tmp/xyz_monitor_serials.state"
-REPO_DIR="/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MENU_SCRIPT="$REPO_DIR/bin/menu.py"
 CFG_LOADER="$REPO_DIR/bin/config_loader.py"
 PYTHONPATH_DIR="$REPO_DIR/bin"
@@ -210,6 +211,55 @@ is_monitor_or_scrcpy_active() {
     return 1
 }
 
+open_menu_terminal() {
+    local geometry="$1"
+    local title="$2"
+    local os_name
+    os_name="$(uname -s 2>/dev/null || echo Linux)"
+
+    case "$os_name" in
+        Linux)
+            if command -v gnome-terminal > /dev/null 2>&1; then
+                gnome-terminal --hide-menubar --geometry="$geometry" --title="$title" -- python3 "$MENU_SCRIPT"
+                return 0
+            fi
+            if command -v x-terminal-emulator > /dev/null 2>&1; then
+                x-terminal-emulator -geometry "$geometry" -title "$title" -e python3 "$MENU_SCRIPT"
+                return 0
+            fi
+            if command -v xfce4-terminal > /dev/null 2>&1; then
+                xfce4-terminal --geometry="$geometry" --title="$title" --command "python3 \"$MENU_SCRIPT\""
+                return 0
+            fi
+            if command -v konsole > /dev/null 2>&1; then
+                konsole --geometry "$geometry" --new-tab -e python3 "$MENU_SCRIPT"
+                return 0
+            fi
+            if command -v xterm > /dev/null 2>&1; then
+                cols="${geometry%x*}"
+                rows="${geometry#*x}"
+                xterm -geometry "${cols}x${rows}" -T "$title" -e python3 "$MENU_SCRIPT"
+                return 0
+            fi
+            ;;
+        Darwin)
+            if command -v osascript > /dev/null 2>&1; then
+                local escaped_menu_script
+                escaped_menu_script="${MENU_SCRIPT//\"/\\\"}"
+                osascript -e "tell application \"Terminal\" to do script \"python3 \\\"${escaped_menu_script}\\\"\""
+                return $?
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            if command -v powershell.exe > /dev/null 2>&1; then
+                powershell.exe -NoProfile -Command "Start-Process powershell -ArgumentList '-NoExit','-Command','python3 \"${MENU_SCRIPT}\"'"
+                return $?
+            fi
+            ;;
+    esac
+    return 1
+}
+
 while true; do
     if [ "${MONITOR_TEST_MODE:-0}" = "1" ]; then
         CURRENT_SERIALS="${TEST_CURR_SERIALS:-${TEST_DEVICE_SERIAL:-}}"
@@ -245,7 +295,9 @@ while true; do
                 if [ "${MONITOR_TEST_MODE:-0}" = "1" ]; then
                     echo "OPEN_TERMINAL:$GEOMETRY:$DEVICE_SERIAL"
                 else
-                    gnome-terminal --hide-menubar --geometry="$GEOMETRY" --title="XYZ Monitor - $DEVICE_SERIAL" -- python3 "$MENU_SCRIPT"
+                    if ! open_menu_terminal "$GEOMETRY" "XYZ Monitor - $DEVICE_SERIAL"; then
+                        log_message "[WARNING] No compatible terminal emulator found. Popup launch skipped."
+                    fi
                 fi
                 sleep 3
             fi

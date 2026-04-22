@@ -37,6 +37,7 @@ ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 ROOT_DIR = Path(__file__).resolve().parent.parent
 LOCK_PATH = "/tmp/xyz_menu.lock"
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
+SCRCPY_VENDOR_BIN = ROOT_DIR / "vendor" / "scrcpy"
 LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
 
@@ -147,36 +148,95 @@ def list_devices():
         return []
 
 
+def resolve_scrcpy_binary():
+    if SCRCPY_VENDOR_BIN.exists() and os.access(SCRCPY_VENDOR_BIN, os.X_OK):
+        return str(SCRCPY_VENDOR_BIN)
+    return "scrcpy"
+
+
 def scrcpy_supports_microphone():
+    scrcpy_bin = resolve_scrcpy_binary()
     try:
-        output = subprocess.check_output(["scrcpy", "--help"], text=True, stderr=subprocess.STDOUT)
+        output = subprocess.check_output([scrcpy_bin, "--help"], text=True, stderr=subprocess.STDOUT)
     except (subprocess.SubprocessError, OSError):
         return False
     lowered = output.lower()
     return "--audio-source" in lowered and "mic" in lowered
 
 
+def _pactl_short_entries(kind):
+    output = subprocess.check_output(["pactl", "list", "short", kind], text=True)
+    entries = []
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if not parts:
+            continue
+        entries.append(parts)
+    return entries
+
+
+def audio_input_exists(name):
+    try:
+        if sys.platform == "linux":
+            if shutil.which("pactl") is None:
+                return False
+            source_entries = _pactl_short_entries("sources")
+            source_names = [parts[1].strip() for parts in source_entries if len(parts) > 1]
+            return name in source_names
+
+        if sys.platform == "darwin":
+            output = subprocess.check_output(["system_profiler", "SPAudioDataType"], text=True, stderr=subprocess.STDOUT)
+            lowered = output.lower()
+            return name.lower() in lowered
+
+        if sys.platform.startswith("win"):
+            output = subprocess.check_output(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_SoundDevice | Select-Object -ExpandProperty Name",
+                ],
+                text=True,
+                stderr=subprocess.STDOUT,
+            )
+            return name.lower() in output.lower()
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return False
+
+
 def ensure_microphone_bus(enabled):
     if not enabled:
         return False
     if sys.platform.startswith("win"):
+        if audio_input_exists(MIC_BUS_NAME):
+            return True
         print("[WARN] Windows microphone bus requires a virtual audio cable (for example VB-CABLE).")
-        print(f"[WARN] Configure that virtual input/output as '{MIC_BUS_NAME}' manually.")
+        print(f"[WARN] Create or rename a virtual input to '{MIC_BUS_NAME}', then select it as your recording input.")
+        return False
+    if sys.platform == "darwin":
+        if audio_input_exists(MIC_BUS_NAME):
+            return True
+        print("[WARN] macOS microphone bus requires a virtual loopback driver (for example BlackHole).")
+        print(f"[WARN] Create or rename an input device as '{MIC_BUS_NAME}', then route system audio to it.")
         return False
     if sys.platform != "linux":
-        print("[WARN] Microphone bus is currently implemented on Linux only.")
+        print("[WARN] Microphone bus is not supported on this OS yet.")
         return False
     if shutil.which("pactl") is None:
         print("[WARN] microphone_bus requires 'pactl' (PulseAudio/PipeWire).")
         return False
     try:
-        # Cleanup legacy implementation that created an extra output sink.
-        modules = subprocess.check_output(["pactl", "list", "short", "modules"], text=True)
-        for line in modules.splitlines():
-            parts = line.split("\t")
-            if len(parts) < 2:
-                continue
+        modules = _pactl_short_entries("modules")
+        primary_remap_module_id = ""
+        duplicate_module_ids = []
+
+        # Cleanup legacy implementation that created an extra output sink,
+        # and collapse duplicate remap modules for xyz-mic-input.
+        for parts in modules:
             mod_id = parts[0].strip()
+            module_name = parts[1].strip() if len(parts) > 1 else ""
             args = parts[-1]
             if f"sink_name={MIC_BUS_NAME}-sink" in args:
                 subprocess.run(
@@ -185,15 +245,38 @@ def ensure_microphone_bus(enabled):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
+                continue
+            if module_name == "module-remap-source" and f"source_name={MIC_BUS_NAME}" in args:
+                if not primary_remap_module_id:
+                    primary_remap_module_id = mod_id
+                else:
+                    duplicate_module_ids.append(mod_id)
 
-        existing_sources = subprocess.check_output(["pactl", "list", "short", "sources"], text=True)
-        if MIC_BUS_NAME in existing_sources:
+        for mod_id in duplicate_module_ids:
+            subprocess.run(
+                ["pactl", "unload-module", mod_id],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        if audio_input_exists(MIC_BUS_NAME):
             return True
+
+        # If a stale remap module exists but source is gone, unload and rebuild cleanly.
+        if primary_remap_module_id:
+            subprocess.run(
+                ["pactl", "unload-module", primary_remap_module_id],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
         default_sink = subprocess.check_output(["pactl", "get-default-sink"], text=True).strip()
         if not default_sink:
             print("[WARN] Could not detect default sink for microphone bus.")
             return False
-        subprocess.run(
+        created = subprocess.run(
             [
                 "pactl",
                 "load-module",
@@ -206,7 +289,11 @@ def ensure_microphone_bus(enabled):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        return True
+        if created.returncode != 0:
+            print("[WARN] Unable to create microphone bus module.")
+            return False
+
+        return audio_input_exists(MIC_BUS_NAME)
     except (subprocess.SubprocessError, OSError):
         print("[WARN] Unable to initialize microphone bus.")
         return False
@@ -217,7 +304,8 @@ def launch_scrcpy(serial, cfg):
     audio_target = str(cfg.get("audio_target", "host")).lower()
     active_recall = bool(cfg.get("active_recall", False))
     microphone_bus = bool(cfg.get("microphone_bus", False))
-    cmd = ["scrcpy", "-s", serial, "--render-driver=software"]
+    scrcpy_bin = resolve_scrcpy_binary()
+    cmd = [scrcpy_bin, "-s", serial, "--render-driver=software"]
     if audio_target == "device":
         cmd.append("--no-audio")
     if active_recall:

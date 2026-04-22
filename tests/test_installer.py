@@ -132,6 +132,23 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(install_xyz._safe_delete_repo_copy(repo))
             self.assertFalse(repo.exists())
 
+    def test_project_scripts_use_portable_paths(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            src = Path(install_xyz.__file__).resolve().parent
+            dst = root / "installed-copy"
+            install_xyz.copy_project(src, dst)
+
+            monitor_text = (dst / "bin" / "monitor.sh").read_text(encoding="utf-8")
+            repair_text = (dst / "repair_xyz.sh").read_text(encoding="utf-8")
+            syntax_text = (dst / "bin" / "test_syntax.py").read_text(encoding="utf-8")
+            service_text = (dst / "systemd" / "scrcpy-auto.service").read_text(encoding="utf-8")
+
+            self.assertNotIn("/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy", monitor_text)
+            self.assertNotIn("/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy", repair_text)
+            self.assertNotIn("/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy", syntax_text)
+            self.assertIn("%h/.local/share/xyz-scrcpy/bin/monitor.sh", service_text)
+
 
 if __name__ == "__main__":
     unittest.main()

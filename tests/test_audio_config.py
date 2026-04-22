@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -13,6 +14,20 @@ import menu  # noqa: E402
 
 
 class AudioConfigTests(unittest.TestCase):
+    def test_resolve_scrcpy_binary_prefers_vendor(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_vendor = Path(td) / "scrcpy"
+            fake_vendor.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            fake_vendor.chmod(0o755)
+            with patch("menu.SCRCPY_VENDOR_BIN", fake_vendor):
+                self.assertEqual(menu.resolve_scrcpy_binary(), str(fake_vendor))
+
+    def test_resolve_scrcpy_binary_falls_back_to_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_vendor = Path(td) / "scrcpy-missing"
+            with patch("menu.SCRCPY_VENDOR_BIN", fake_vendor):
+                self.assertEqual(menu.resolve_scrcpy_binary(), "scrcpy")
+
     def test_defaults_include_audio_target(self):
         cfg = config_loader._normalize_config({})
         self.assertEqual(cfg["audio_target"], "host")
@@ -36,10 +51,13 @@ class AudioConfigTests(unittest.TestCase):
 
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=False)
+    @patch("menu.print")
+    @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_host_does_not_add_no_audio(self, mock_popen, _mic_support, _bus):
+    def test_launch_scrcpy_host_does_not_add_no_audio(self, mock_popen, _resolve, _print, _mic_support, _bus):
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": False, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
+        self.assertEqual(args[0], "/tmp/vendor/scrcpy")
         self.assertNotIn("--no-audio", args)
 
     @patch("menu.ensure_microphone_bus")
@@ -69,11 +87,36 @@ class AudioConfigTests(unittest.TestCase):
 
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=False)
+    @patch("menu.print")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_skips_mic_flag_when_unsupported(self, mock_popen, _mic_support, _bus):
+    def test_launch_scrcpy_skips_mic_flag_when_unsupported(self, mock_popen, _print, _mic_support, _bus):
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": True, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertNotIn("--audio-source=mic", args)
+
+    @patch("menu.sys.platform", "linux")
+    @patch("menu.shutil.which", return_value="/usr/bin/pactl")
+    @patch("menu.subprocess.run")
+    @patch(
+        "menu.subprocess.check_output",
+        side_effect=[
+            "1\tmodule-device-restore\t\t\n",
+            "33\txyz-mic-input\tmodule-remap-source.c\tfloat32le 2ch 48000Hz\tRUNNING\n",
+        ],
+    )
+    def test_microphone_bus_reuses_existing_source(self, _check_output, mock_run, _which):
+        self.assertTrue(menu.ensure_microphone_bus(True))
+        mock_run.assert_not_called()
+
+    @patch("menu.sys.platform", "darwin")
+    @patch("menu.audio_input_exists", return_value=True)
+    def test_microphone_bus_reuses_existing_source_on_macos(self, _exists):
+        self.assertTrue(menu.ensure_microphone_bus(True))
+
+    @patch("menu.sys.platform", "win32")
+    @patch("menu.audio_input_exists", return_value=True)
+    def test_microphone_bus_reuses_existing_source_on_windows(self, _exists):
+        self.assertTrue(menu.ensure_microphone_bus(True))
 
     @patch("menu.ensure_microphone_bus", return_value=True)
     @patch("menu.scrcpy_supports_microphone", return_value=False)

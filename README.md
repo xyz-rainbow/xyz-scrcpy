@@ -19,8 +19,10 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 - `adb`
 - `scrcpy`
 - `bash`
-- Linux desktop with `systemd --user` and `gnome-terminal` for full auto-start UX
-- Bundled upstream `scrcpy` in `vendor/` is currently aligned to latest stable tag `v3.3.4`
+- Linux desktop with `systemd --user` and any common terminal emulator for full auto-start UX
+- macOS (Terminal app fallback via AppleScript)
+- Windows (best-effort monitor popup via PowerShell terminal fallback)
+- Bundled upstream `scrcpy` in `vendor/` is aligned to latest stable tag `v3.3.4` and is preferred at runtime (fallback: system `scrcpy` in `PATH`)
 
 ## Architecture and Flows (SVG)
 
@@ -112,8 +114,9 @@ python3 install_xyz.py --action uninstall --yes
 - If `active_recall=ON` and `audio_target=DEVICE`, config is normalized to `audio_target=HOST` for compatibility.
 - If current scrcpy version does not support Android microphone capture, app falls back safely with warning (no crash).
 - With `microphone_bus=ON`, app prioritizes virtual bus routing through `xyz-mic-input`.
-  - Linux: creates a remapped source from the current default sink monitor (no dedicated extra virtual output sink).
-  - Windows: shows guided fallback notice; requires external virtual audio cable setup (for example VB-CABLE) and manual routing.
+  - Linux: creates a remapped source from the current default sink monitor (no dedicated extra virtual output sink), reuses existing `xyz-mic-input` if present, and avoids duplicate module/source creation.
+  - macOS: detects existing `xyz-mic-input`; otherwise shows guided setup (virtual loopback driver such as BlackHole).
+  - Windows: detects existing `xyz-mic-input`; otherwise shows guided setup (virtual cable such as VB-CABLE).
 
 ### Pause and reconnect contract
 
@@ -210,13 +213,14 @@ python3 install_xyz.py --action uninstall --yes
 | Device discovery and labels | `bin/menu.py` | Uses `adb devices` + model lookup |
 | Device launch with audio target | `bin/menu.py` | Starts `scrcpy` with `--no-audio` when target is `DEVICE` |
 | Microphone forwarding capability check | `bin/menu.py` | Adds mic flag only when detected as supported by current `scrcpy` |
-| Virtual microphone bus (`xyz-mic-input`) | `bin/menu.py` | Linux-only best-effort setup via `pactl` with safe fallback |
+| scrcpy binary resolution | `bin/menu.py` | Uses `vendor/scrcpy` when executable, else falls back to `scrcpy` from `PATH` |
+| Virtual microphone bus (`xyz-mic-input`) | `bin/menu.py` | Linux auto-setup via `pactl` with duplicate-safe reuse, plus macOS/Windows existing-device detection and guided fallback |
 | Settings editing (`Apply`/`Cancel`) | `bin/menu.py` | Includes alias, audio/mic, auto flags, and pause options |
 | Restart-to-apply audio/mic settings | `bin/menu.py` | `RESTART` button highlights when pending changes exist |
 | Pause activation on exit | `bin/menu.py` | Persists pause state/timer in config |
 | Config defaults and normalization | `bin/config_loader.py` | Backward compatibility and type coercion |
 | Config persistence (`config.json`) | `bin/config_loader.py` | Atomic save via temp file replace |
-| Auto monitor loop | `bin/monitor.sh` | Polls devices and decides popup launch |
+| Auto monitor loop | `bin/monitor.sh` | Polls devices and decides popup launch with Linux/macOS/Windows terminal fallbacks |
 | Popup anti-spam guard | `bin/monitor.sh` | Detects active monitor terminal or `scrcpy` process |
 | Reconnect-aware pause resume | `bin/monitor.sh` | Uses serial snapshots and pause flags |
 | Pre-launch check gate | `bin/launch_with_checks.sh` | Runs checks, handles fail-open prompt |

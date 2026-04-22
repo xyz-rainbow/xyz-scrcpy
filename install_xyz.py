@@ -239,7 +239,6 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
         run_cmd(["systemctl", "--user", "daemon-reload"])
         if enable_service:
             run_cmd(["systemctl", "--user", "enable", "--now", "scrcpy-auto.service"])
-            run_cmd(["systemctl", "--user", "start", "scrcpy-auto.service"])
         else:
             run_cmd(["systemctl", "--user", "disable", "scrcpy-auto.service"], check=False)
             run_cmd(["systemctl", "--user", "stop", "scrcpy-auto.service"], check=False)
