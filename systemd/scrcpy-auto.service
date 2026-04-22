@@ -1,0 +1,35 @@
+# __  ____   _______
+# \ \/ /\ \ / /__  /
+#  \  /  \ V /  / / 
+#  /  \   | |  / /_ 
+# /_/\_\  |_| /____|
+# #xyz-rainbowtechnology
+# #rainbowtechnology.xyz
+# #rainbow.xyz
+# #rainbow@rainbowtechnology.xyz
+# #i-love-you
+# #You're not supposed to see this!
+
+[Unit]
+Description=XYZ / Rainbowtechnology - scrcpy Auto-Monitor Service
+After=network.target
+
+[Service]
+# #xyz-rainbow
+ExecStart=/bin/bash /home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy/bin/monitor.sh
+Restart=always
+RestartSec=10
+Environment=DISPLAY=:0
+Environment=XDG_SESSION_TYPE=wayland
+StandardOutput=append:/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy/config/scrcpy.log
+StandardError=append:/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy/config/scrcpy.log
+
+[Install]
+WantedBy=default.target
+
+# #xyz-rainbow
+# #rainbowtechnology.xyz
+# #rainbow.xyz
+# #rainbow@rainbowtechnology.xyz
+# #i-love-you
+# #You're not supposed to see this!
