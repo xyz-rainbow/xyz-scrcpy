@@ -47,9 +47,8 @@ def main():
         os.system('clear')
         out = []
         # Header compacto solicitado
-        out.append(f"{border.center(w)}")
         out.append(f"{ '[SPACE] [ENTER] [ESC]'.center(w)}")
-        out.append(f"{border.center(w)}")
+        out.append(f"{RED}{border.center(w)}{RESET}")
         
         # Arte ASCII
         for line in ASCII_ART: out.append(f"{GREEN}{line.center(w)}{RESET}")
