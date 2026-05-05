@@ -40,6 +40,8 @@ INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
 SCRCPY_VENDOR_BIN = ROOT_DIR / "vendor" / "scrcpy"
 LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
+BANNER_COLORS = {"ERROR": RED, "WARN": ORANGE, "OK": GREEN}
+INSTALLABLE_EXTENSIONS = {".apk"}
 
 
 def get_key():
@@ -89,6 +91,198 @@ def prompt_text_input(prompt, default):
     sys.stdout.flush()
     value = input(f"{prompt} [{default}]: ").strip()
     return value if value else default
+
+
+def run_command(cmd):
+    try:
+        proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    except OSError as exc:
+        return False, "", str(exc), 1
+    return proc.returncode == 0, proc.stdout.strip(), proc.stderr.strip(), proc.returncode
+
+
+def make_banner(level, message, ttl=3):
+    return {"level": level, "message": str(message), "ttl": max(1, int(ttl))}
+
+
+def tick_banner(banner):
+    if not banner:
+        return None
+    updated = dict(banner)
+    updated["ttl"] = int(updated.get("ttl", 1)) - 1
+    if updated["ttl"] <= 0:
+        return None
+    return updated
+
+
+def is_installable_file(path):
+    ext = Path(path).suffix.lower()
+    return ext in INSTALLABLE_EXTENSIONS
+
+
+def parse_pm_path_output(output):
+    paths = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("package:"):
+            continue
+        remote_path = line[len("package:") :].strip()
+        if remote_path:
+            paths.append(remote_path)
+    return paths
+
+
+def show_simple_selection(title, options, banner=None, footer_hint="[UP/DOWN] move [ENTER] select [ESC] back"):
+    idx = 0
+    local_banner = banner
+    while True:
+        width = terminal_width()
+        border = "=" * width
+        lines = []
+        if local_banner:
+            level = str(local_banner.get("level", "WARN")).upper()
+            color = BANNER_COLORS.get(level, ORANGE)
+            msg = trunc_text(f"[{level}] {local_banner.get('message', '')}", width - 2)
+            lines.append(center_line(f"{color}{msg}{RESET}", width))
+            lines.append("")
+        lines.extend(
+            [
+                center_line(f"{GREEN}{border}{RESET}", width),
+                center_line(f"{MAGENTA}{title}{RESET}", width),
+                center_line(f"{GREEN}{border}{RESET}", width),
+                "",
+            ]
+        )
+        for i, opt in enumerate(options):
+            text = trunc_text(opt, width - 4)
+            lines.append(center_line((f"> {text}" if i == idx else f"  {text}"), width))
+        lines.extend(["", center_line(footer_hint, width)])
+        os.system("clear")
+        sys.stdout.write("\n".join(lines))
+        sys.stdout.flush()
+
+        key = get_key()
+        local_banner = tick_banner(local_banner)
+        if key == "\x1b[A":
+            idx = (idx - 1) % len(options)
+        elif key == "\x1b[B":
+            idx = (idx + 1) % len(options)
+        elif key == "\r":
+            return idx
+        elif key == "\x1b":
+            return None
+
+
+def pick_path_with_hybrid_selector(title, mode_title, ask_directory=False, banner=None):
+    mode_options = ["GUI picker", "Manual path", "Back"]
+    mode_idx = show_simple_selection(mode_title, mode_options, banner=banner)
+    if mode_idx is None or mode_options[mode_idx] == "Back":
+        return None, make_banner("WARN", "Action cancelled.")
+    mode = mode_options[mode_idx]
+
+    if mode == "Manual path":
+        os.system("clear")
+        try:
+            entered = prompt_text_input(title, "")
+        except EOFError:
+            entered = ""
+        path = Path(entered).expanduser() if entered else None
+    else:
+        path = pick_path_with_gui(ask_directory=ask_directory)
+        if path is None:
+            return None, make_banner("WARN", "GUI picker unavailable or cancelled.")
+
+    if path is None:
+        return None, make_banner("WARN", "No path selected.")
+    return path, None
+
+
+def pick_path_with_gui(ask_directory=False):
+    if shutil.which("zenity"):
+        cmd = ["zenity", "--file-selection", "--title=Select path"]
+        if ask_directory:
+            cmd.append("--directory")
+        ok, out, _err, _code = run_command(cmd)
+        if ok and out:
+            return Path(out.strip()).expanduser()
+        return None
+    if shutil.which("kdialog"):
+        if ask_directory:
+            cmd = ["kdialog", "--getexistingdirectory", str(Path.home())]
+        else:
+            cmd = ["kdialog", "--getopenfilename", str(Path.home()), "*.apk"]
+        ok, out, _err, _code = run_command(cmd)
+        if ok and out:
+            return Path(out.strip()).expanduser()
+        return None
+    return None
+
+
+def adb_list_packages(serial):
+    ok, out, err, _ = run_command(["adb", "-s", serial, "shell", "pm", "list", "packages"])
+    if not ok:
+        return None, err or "Unable to list packages."
+    packages = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("package:"):
+            pkg = line[len("package:") :].strip()
+            if pkg:
+                packages.append(pkg)
+    return sorted(packages), None
+
+
+def adb_install_apk(serial, apk_path):
+    return run_command(["adb", "-s", serial, "install", "-r", str(apk_path)])
+
+
+def adb_uninstall_package(serial, package_name):
+    return run_command(["adb", "-s", serial, "uninstall", package_name])
+
+
+def adb_disconnect(serial):
+    ok, out, err, code = run_command(["adb", "-s", serial, "disconnect"])
+    if ok:
+        return True, out, err, code
+    return run_command(["adb", "disconnect", serial])
+
+
+def adb_export_apk_to_dir(serial, package_name, destination_dir):
+    ok, out, err, _ = run_command(["adb", "-s", serial, "shell", "pm", "path", package_name])
+    if not ok:
+        return False, [], err or "Unable to get APK paths."
+    remote_paths = parse_pm_path_output(out)
+    if not remote_paths:
+        return False, [], "No APK paths found for package."
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    exported = []
+    for index, remote in enumerate(remote_paths, start=1):
+        suffix = f"-{index}" if len(remote_paths) > 1 else ""
+        target = destination_dir / f"{package_name}{suffix}.apk"
+        pull_ok, _out, pull_err, _ = run_command(["adb", "-s", serial, "pull", remote, str(target)])
+        if not pull_ok:
+            return False, exported, pull_err or f"Failed pulling {remote}"
+        exported.append(str(target))
+    return True, exported, ""
+
+
+def adb_try_backup(serial, package_name, destination_dir):
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    backup_file = destination_dir / f"{package_name}.ab"
+    return run_command(
+        [
+            "adb",
+            "-s",
+            serial,
+            "backup",
+            "-apk",
+            "-obb",
+            "-f",
+            str(backup_file),
+            package_name,
+        ]
+    )
 
 
 def sync_alias_launcher(alias):
@@ -317,13 +511,22 @@ def launch_scrcpy(serial, cfg):
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=dict(os.environ))
 
 
-def render_menu(opts, idx, width):
+def render_menu(opts, idx, width, banner=None):
     border = "=" * width
-    out = [
-        center_line("[SPACE] [ENTER] [ESC]".center(width), width),
-        center_line(f"{RED}{border}{RESET}", width),
-        "",
-    ]
+    out = []
+    if banner:
+        level = str(banner.get("level", "WARN")).upper()
+        color = BANNER_COLORS.get(level, ORANGE)
+        msg = trunc_text(f"[{level}] {banner.get('message', '')}", width - 2)
+        out.append(center_line(f"{color}{msg}{RESET}", width))
+        out.append("")
+    out.extend(
+        [
+            center_line("[SPACE] [ENTER] [ESC]".center(width), width),
+            center_line(f"{RED}{border}{RESET}", width),
+            "",
+        ]
+    )
     for line in LOGO:
         out.append(center_line(f"{GREEN}{line.center(width)}{RESET}", width))
     out.append("")
@@ -343,6 +546,214 @@ def render_menu(opts, idx, width):
         ]
     )
     return out
+
+
+def confirm_action(message, default_no=True):
+    os.system("clear")
+    suffix = "[y/N]" if default_no else "[Y/n]"
+    try:
+        response = input(f"{message} {suffix}: ").strip().lower()
+    except EOFError:
+        return not default_no
+    if not response:
+        return not default_no
+    return response in {"y", "yes"}
+
+
+def select_package_from_device(serial, banner=None):
+    packages, err = adb_list_packages(serial)
+    if err:
+        return None, make_banner("ERROR", f"ADB error: {err}")
+    if not packages:
+        return None, make_banner("WARN", "No packages found on device.")
+
+    idx = show_simple_selection(
+        f"APPS ON DEVICE ({serial})",
+        packages,
+        banner=banner,
+        footer_hint="[UP/DOWN] package [ENTER] select [ESC] back",
+    )
+    if idx is None:
+        return None, make_banner("WARN", "Selection cancelled.")
+    return packages[idx], None
+
+
+def apps_submenu(serial, banner=None):
+    options = ["Install APK", "Download to PC", "Uninstall from device", "Back"]
+    idx = 0
+    local_banner = banner
+    while True:
+        width = terminal_width()
+        lines = render_menu([f"{opt} ({serial})" if opt != "Back" else opt for opt in options], idx, width, banner=local_banner)
+        os.system("clear")
+        sys.stdout.write("\n".join(lines))
+        sys.stdout.flush()
+
+        key = get_key()
+        local_banner = tick_banner(local_banner)
+        if key == "\x1b[A":
+            idx = (idx - 1) % len(options)
+            continue
+        if key == "\x1b[B":
+            idx = (idx + 1) % len(options)
+            continue
+        if key == "\x1b":
+            return make_banner("WARN", "Back to device menu.")
+        if key != "\r":
+            continue
+
+        selected = options[idx]
+        if selected == "Back":
+            return make_banner("WARN", "Back to device menu.")
+
+        if selected == "Install APK":
+            apk_path, picker_banner = pick_path_with_hybrid_selector(
+                "APK file path",
+                "INSTALL APK - PICKER MODE",
+                ask_directory=False,
+                banner=local_banner,
+            )
+            if picker_banner:
+                local_banner = picker_banner
+                continue
+            if not apk_path or not apk_path.exists():
+                local_banner = make_banner("ERROR", "Invalid path: file not found.")
+                continue
+            if not is_installable_file(apk_path):
+                local_banner = make_banner("ERROR", "Only .apk files are supported.")
+                continue
+            ok, out, err, _ = adb_install_apk(serial, apk_path)
+            if ok:
+                local_banner = make_banner("OK", f"Installed APK: {apk_path.name}")
+            else:
+                local_banner = make_banner("ERROR", f"Install failed: {err or out or 'unknown error'}")
+            continue
+
+        if selected == "Uninstall from device":
+            package_name, pkg_banner = select_package_from_device(serial, banner=local_banner)
+            if pkg_banner:
+                local_banner = pkg_banner
+                continue
+            if not confirm_action(f"Uninstall '{package_name}' from device?", default_no=True):
+                local_banner = make_banner("WARN", "Uninstall cancelled.")
+                continue
+            ok, out, err, _ = adb_uninstall_package(serial, package_name)
+            if ok:
+                local_banner = make_banner("OK", f"Uninstalled: {package_name}")
+            else:
+                local_banner = make_banner("ERROR", f"Uninstall failed: {err or out or 'unknown error'}")
+            continue
+
+        if selected == "Download to PC":
+            package_name, pkg_banner = select_package_from_device(serial, banner=local_banner)
+            if pkg_banner:
+                local_banner = pkg_banner
+                continue
+            mode_options = ["Export APK(s)", "Backup app+data (try)", "Auto (best available)", "Back"]
+            mode_idx = show_simple_selection("DOWNLOAD MODE", mode_options, banner=local_banner)
+            if mode_idx is None or mode_options[mode_idx] == "Back":
+                local_banner = make_banner("WARN", "Download cancelled.")
+                continue
+
+            destination_dir, dir_banner = pick_path_with_hybrid_selector(
+                "Destination directory",
+                "DOWNLOAD - DESTINATION PICKER",
+                ask_directory=True,
+                banner=local_banner,
+            )
+            if dir_banner:
+                local_banner = dir_banner
+                continue
+            if destination_dir is None:
+                local_banner = make_banner("ERROR", "No destination selected.")
+                continue
+
+            selected_mode = mode_options[mode_idx]
+            if selected_mode == "Export APK(s)":
+                ok, exported, err = adb_export_apk_to_dir(serial, package_name, destination_dir)
+                if ok:
+                    local_banner = make_banner("OK", f"Exported {len(exported)} APK file(s).")
+                else:
+                    local_banner = make_banner("ERROR", f"Export failed: {err}")
+                continue
+
+            if selected_mode == "Backup app+data (try)":
+                ok, out, err, _ = adb_try_backup(serial, package_name, destination_dir)
+                if ok:
+                    local_banner = make_banner("OK", f"Backup created for {package_name}.")
+                else:
+                    local_banner = make_banner("WARN", f"Backup unavailable: {err or out or 'not supported'}")
+                continue
+
+            backup_ok, out, err, _ = adb_try_backup(serial, package_name, destination_dir)
+            if backup_ok:
+                local_banner = make_banner("OK", f"Backup created for {package_name}.")
+                continue
+            export_ok, exported, export_err = adb_export_apk_to_dir(serial, package_name, destination_dir)
+            if export_ok:
+                local_banner = make_banner("WARN", f"Backup unavailable, exported {len(exported)} APK file(s).")
+            else:
+                local_banner = make_banner("ERROR", f"Auto mode failed: {err or out or export_err}")
+            continue
+
+
+def device_submenu(device, cfg, banner=None):
+    serial = device["serial"]
+    options = ["Screen Share", "Apps", "Disconnect", "Back"]
+    idx = 0
+    local_banner = banner
+    updated_cfg = dict(cfg)
+    while True:
+        width = terminal_width()
+        decorated = [f"{opt} ({serial})" if opt != "Back" else opt for opt in options]
+        lines = render_menu(decorated, idx, width, banner=local_banner)
+        os.system("clear")
+        sys.stdout.write("\n".join(lines))
+        sys.stdout.flush()
+
+        key = get_key()
+        local_banner = tick_banner(local_banner)
+        if key == "\x1b[A":
+            idx = (idx - 1) % len(options)
+            continue
+        if key == "\x1b[B":
+            idx = (idx + 1) % len(options)
+            continue
+        if key == "\x1b":
+            return updated_cfg, make_banner("WARN", "Back to main menu.")
+        if key != "\r":
+            continue
+
+        selected = options[idx]
+        if selected == "Back":
+            return updated_cfg, make_banner("WARN", "Back to main menu.")
+
+        if selected == "Screen Share":
+            updated_cfg = normalize_audio_preferences(updated_cfg)
+            launch_scrcpy(serial, updated_cfg)
+            updated_cfg["applied_audio_target"] = updated_cfg.get("audio_target", "host")
+            updated_cfg["applied_active_recall"] = bool(updated_cfg.get("active_recall", False))
+            updated_cfg["applied_microphone_bus"] = bool(updated_cfg.get("microphone_bus", False))
+            updated_cfg["last_device_serial"] = serial
+            save_config(updated_cfg)
+            updated_cfg = load_config()
+            local_banner = make_banner("OK", f"Screen Share started for {serial}.")
+            continue
+
+        if selected == "Disconnect":
+            if not confirm_action(f"Disconnect device '{serial}'?", default_no=True):
+                local_banner = make_banner("WARN", "Disconnect cancelled.")
+                continue
+            ok, out, err, _ = adb_disconnect(serial)
+            if ok:
+                local_banner = make_banner("OK", f"Disconnected: {serial}")
+            else:
+                local_banner = make_banner("ERROR", f"Disconnect failed: {err or out or 'unknown error'}")
+            continue
+
+        if selected == "Apps":
+            local_banner = apps_submenu(serial, banner=local_banner)
+            continue
 
 
 def settings_screen(cfg):
@@ -546,6 +957,7 @@ def main():
 
     idx = 0
     cfg = load_config()
+    banner = None
     try:
         while True:
             width = terminal_width()
@@ -561,10 +973,11 @@ def main():
                 idx = 0
 
             os.system("clear")
-            sys.stdout.write("\n".join(render_menu(opts, idx, width)))
+            sys.stdout.write("\n".join(render_menu(opts, idx, width, banner=banner)))
             sys.stdout.flush()
 
             key = get_key()
+            banner = tick_banner(banner)
             if key == "\x1b[A":
                 idx = (idx - 1) % len(opts)
             elif key == "\x1b[B":
@@ -576,7 +989,8 @@ def main():
                         activate_pause_on_exit(cfg)
                     break
                 if selected == "SETTINGS":
-                    cfg, _ = settings_screen(cfg)
+                    cfg, settings_action = settings_screen(cfg)
+                    banner = make_banner("OK", "Settings updated.") if settings_action == "apply" else make_banner("WARN", "Settings closed.")
                     continue
                 if "RESTART" in selected:
                     target_serial = cfg.get("last_device_serial")
@@ -598,17 +1012,19 @@ def main():
                         cfg["last_device_serial"] = target_serial
                         save_config(cfg)
                         cfg = load_config()
+                        banner = make_banner("OK", f"Restarted screen share for {target_serial}.")
+                    else:
+                        banner = make_banner("WARN", "No target device available to restart.")
                     continue
-                match = re.search(r"\((.*?)\)$", selected)
-                device_serial = match.group(1) if match else selected
-                cfg = normalize_audio_preferences(cfg)
-                launch_scrcpy(device_serial, cfg)
-                cfg["applied_audio_target"] = cfg.get("audio_target", "host")
-                cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))
-                cfg["applied_microphone_bus"] = bool(cfg.get("microphone_bus", False))
-                cfg["last_device_serial"] = device_serial
-                save_config(cfg)
-                cfg = load_config()
+                selected_device = None
+                for device in devices:
+                    if device["label"] == selected:
+                        selected_device = device
+                        break
+                if not selected_device:
+                    banner = make_banner("ERROR", "Device not found in current list.")
+                    continue
+                cfg, banner = device_submenu(selected_device, cfg, banner=banner)
             elif key == "\x1b":
                 break
     finally:
