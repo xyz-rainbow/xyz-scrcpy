@@ -2,6 +2,7 @@
 import fcntl
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -42,6 +43,7 @@ LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
 BANNER_COLORS = {"ERROR": RED, "WARN": ORANGE, "OK": GREEN}
 INSTALLABLE_EXTENSIONS = {".apk"}
+ESCAPE_READ_TIMEOUT = 0.03
 
 
 def get_key():
@@ -50,9 +52,18 @@ def get_key():
     try:
         tty.setraw(fd)
         ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            ch += sys.stdin.read(2)
-        return ch
+        if ch != "\x1b":
+            return ch
+
+        seq = ch
+        ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
+        if not ready:
+            return "\x1b"
+        seq += sys.stdin.read(1)
+        ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
+        if ready:
+            seq += sys.stdin.read(1)
+        return seq
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
@@ -132,12 +143,34 @@ def parse_pm_path_output(output):
     return paths
 
 
-def show_simple_selection(title, options, banner=None, footer_hint="[UP/DOWN] move [ENTER] select [ESC] back"):
+def render_brand_footer(width):
+    border = "=" * width
+    return [
+        "",
+        center_line(f"{GREEN}{border}{RESET}", width),
+        center_line(f"{NEON_PINK}[{BRAND_NAME}]".center(width) + f"{RESET}", width),
+        center_line(f"{GREEN}{border}{RESET}", width),
+    ]
+
+
+def show_paginated_selection(
+    title,
+    options,
+    banner=None,
+    footer_hint="[UP/DOWN] move [ENTER] select [ESC] back",
+    page_size=10,
+    highlight_selection_red=False,
+):
     idx = 0
     local_banner = banner
     while True:
         width = terminal_width()
         border = "=" * width
+        total = len(options)
+        window_start = max(0, min(idx - (page_size // 2), max(0, total - page_size)))
+        window_end = min(total, window_start + page_size)
+        visible = options[window_start:window_end]
+
         lines = []
         if local_banner:
             level = str(local_banner.get("level", "WARN")).upper()
@@ -147,16 +180,33 @@ def show_simple_selection(title, options, banner=None, footer_hint="[UP/DOWN] mo
             lines.append("")
         lines.extend(
             [
-                center_line(f"{GREEN}{border}{RESET}", width),
+                center_line("[SPACE] [ENTER] [ESC]".center(width), width),
+                center_line(f"{RED}{border}{RESET}", width),
                 center_line(f"{MAGENTA}{title}{RESET}", width),
-                center_line(f"{GREEN}{border}{RESET}", width),
                 "",
             ]
         )
-        for i, opt in enumerate(options):
+
+        if window_start > 0:
+            lines.append(center_line("...", width))
+
+        for offset, opt in enumerate(visible):
+            global_idx = window_start + offset
             text = trunc_text(opt, width - 4)
-            lines.append(center_line((f"> {text}" if i == idx else f"  {text}"), width))
-        lines.extend(["", center_line(footer_hint, width)])
+            if global_idx == idx:
+                if highlight_selection_red:
+                    text = f"{RED}{text}{RESET}"
+                lines.append(center_line(f"> {text}", width))
+            else:
+                lines.append(center_line(f"  {text}", width))
+
+        if window_end < total:
+            lines.append(center_line("...", width))
+
+        lines.append("")
+        lines.append(center_line(footer_hint, width))
+        lines.extend(render_brand_footer(width))
+
         os.system("clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
@@ -164,13 +214,24 @@ def show_simple_selection(title, options, banner=None, footer_hint="[UP/DOWN] mo
         key = get_key()
         local_banner = tick_banner(local_banner)
         if key == "\x1b[A":
-            idx = (idx - 1) % len(options)
+            idx = (idx - 1) % total
         elif key == "\x1b[B":
-            idx = (idx + 1) % len(options)
+            idx = (idx + 1) % total
         elif key == "\r":
             return idx
         elif key == "\x1b":
             return None
+
+
+def show_simple_selection(title, options, banner=None, footer_hint="[UP/DOWN] move [ENTER] select [ESC] back"):
+    return show_paginated_selection(
+        title,
+        options,
+        banner=banner,
+        footer_hint=footer_hint,
+        page_size=10,
+        highlight_selection_red=False,
+    )
 
 
 def pick_path_with_hybrid_selector(title, mode_title, ask_directory=False, banner=None):
@@ -537,14 +598,7 @@ def render_menu(opts, idx, width, banner=None):
         else:
             line = label
         out.append(center_line(line, width))
-    out.extend(
-        [
-            "",
-            center_line(f"{GREEN}{border}{RESET}", width),
-            center_line(f"{NEON_PINK}[{BRAND_NAME}]".center(width) + f"{RESET}", width),
-            center_line(f"{GREEN}{border}{RESET}", width),
-        ]
-    )
+    out.extend(render_brand_footer(width))
     return out
 
 
@@ -560,18 +614,20 @@ def confirm_action(message, default_no=True):
     return response in {"y", "yes"}
 
 
-def select_package_from_device(serial, banner=None):
+def select_package_from_device(serial, banner=None, for_uninstall=False):
     packages, err = adb_list_packages(serial)
     if err:
         return None, make_banner("ERROR", f"ADB error: {err}")
     if not packages:
         return None, make_banner("WARN", "No packages found on device.")
 
-    idx = show_simple_selection(
+    idx = show_paginated_selection(
         f"APPS ON DEVICE ({serial})",
         packages,
         banner=banner,
         footer_hint="[UP/DOWN] package [ENTER] select [ESC] back",
+        page_size=10,
+        highlight_selection_red=for_uninstall,
     )
     if idx is None:
         return None, make_banner("WARN", "Selection cancelled.")
@@ -630,7 +686,7 @@ def apps_submenu(serial, banner=None):
             continue
 
         if selected == "Uninstall from device":
-            package_name, pkg_banner = select_package_from_device(serial, banner=local_banner)
+            package_name, pkg_banner = select_package_from_device(serial, banner=local_banner, for_uninstall=True)
             if pkg_banner:
                 local_banner = pkg_banner
                 continue
@@ -645,7 +701,7 @@ def apps_submenu(serial, banner=None):
             continue
 
         if selected == "Download to PC":
-            package_name, pkg_banner = select_package_from_device(serial, banner=local_banner)
+            package_name, pkg_banner = select_package_from_device(serial, banner=local_banner, for_uninstall=False)
             if pkg_banner:
                 local_banner = pkg_banner
                 continue
@@ -909,6 +965,7 @@ def settings_screen(cfg):
             lines.append(center_line((f"> {text}" if name == selected else f"  {text}"), width))
         lines.append("")
         lines.append(center_line("[UP/DOWN] move [LEFT/RIGHT] quick edit [ENTER] precise/apply [ESC] back", width))
+        lines.extend(render_brand_footer(width))
         os.system("clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
