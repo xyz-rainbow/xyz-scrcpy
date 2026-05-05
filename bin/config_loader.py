@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "last_device_serial": "",
     "auto_start": True,
     "auto_discover": True,
+    "open_cooldown_seconds": 30,
     "resolution": "1080p",
     "exit_pause_minutes": 1440,
     "pause_on_exit": False,
@@ -59,6 +60,11 @@ def _normalize_config(raw_cfg):
     else:
         cfg["exit_pause_minutes"] = int(cfg.get("exit_pause_minutes", 1440) or 1440)
     cfg["exit_pause_minutes"] = max(1, cfg["exit_pause_minutes"])
+    try:
+        cooldown = int(cfg.get("open_cooldown_seconds", DEFAULT_CONFIG["open_cooldown_seconds"]) or DEFAULT_CONFIG["open_cooldown_seconds"])
+    except (TypeError, ValueError):
+        cooldown = DEFAULT_CONFIG["open_cooldown_seconds"]
+    cfg["open_cooldown_seconds"] = max(0, min(cooldown, 600))
     cfg["pause_until_epoch"] = int(cfg.get("pause_until_epoch", 0) or 0)
     cfg["command_alias"] = str(cfg.get("command_alias", "xyz-scrcpy"))
     audio_target = str(cfg.get("audio_target", "host")).strip().lower()

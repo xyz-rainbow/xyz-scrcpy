@@ -32,8 +32,22 @@ class AudioConfigTests(unittest.TestCase):
         cfg = config_loader._normalize_config({})
         self.assertEqual(cfg["audio_target"], "host")
         self.assertEqual(cfg["sound"], "output")
+        self.assertEqual(cfg["open_cooldown_seconds"], 30)
         self.assertFalse(cfg["active_recall"])
         self.assertFalse(cfg["microphone_bus"])
+
+    def test_open_cooldown_normalization_bounds(self):
+        cfg = config_loader._normalize_config({"open_cooldown_seconds": "45"})
+        self.assertEqual(cfg["open_cooldown_seconds"], 45)
+
+        cfg = config_loader._normalize_config({"open_cooldown_seconds": "invalid"})
+        self.assertEqual(cfg["open_cooldown_seconds"], 30)
+
+        cfg = config_loader._normalize_config({"open_cooldown_seconds": -10})
+        self.assertEqual(cfg["open_cooldown_seconds"], 0)
+
+        cfg = config_loader._normalize_config({"open_cooldown_seconds": 9999})
+        self.assertEqual(cfg["open_cooldown_seconds"], 600)
 
     def test_migrate_sound_off_to_device_target(self):
         cfg = config_loader._normalize_config({"sound": "off"})
@@ -125,6 +139,30 @@ class AudioConfigTests(unittest.TestCase):
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": False, "microphone_bus": True})
         env = mock_popen.call_args.kwargs["env"]
         self.assertNotIn("PULSE_SINK", env)
+
+    @patch("menu.sync_alias_launcher")
+    @patch("menu.load_config", return_value={"ok": True})
+    @patch("menu.save_config")
+    @patch("menu.prompt_text_input", return_value="45")
+    @patch("menu.get_key")
+    @patch("menu.os.system")
+    def test_settings_hybrid_edit_updates_cooldown_on_apply(
+        self,
+        _clear,
+        mock_get_key,
+        _prompt,
+        mock_save,
+        _load,
+        _sync_alias,
+    ):
+        cfg = config_loader._normalize_config({})
+        # Move to cooldown -> Enter precise edit -> move to APPLY -> Enter apply.
+        mock_get_key.side_effect = ["\x1b[B", "\x1b[B", "\r"] + (["\x1b[B"] * 7) + ["\r"]
+
+        _, result = menu.settings_screen(cfg)
+        self.assertEqual(result, "apply")
+        saved_cfg = mock_save.call_args[0][0]
+        self.assertEqual(saved_cfg["open_cooldown_seconds"], 45)
 
 
 if __name__ == "__main__":

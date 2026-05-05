@@ -15,11 +15,19 @@ set -u
 
 PID_FILE="/tmp/xyz_monitor.pid"
 SERIAL_STATE_FILE="/tmp/xyz_monitor_serials.state"
+LAST_OPEN_EPOCH_FILE="/tmp/xyz_monitor_last_open.epoch"
+LAST_BLOCK_REASON_FILE="/tmp/xyz_monitor_last_block_reason.state"
+OPEN_COOLDOWN_SECONDS="${OPEN_COOLDOWN_SECONDS:-}"
+OPEN_COOLDOWN_FROM_ENV=0
+if [ -n "${OPEN_COOLDOWN_SECONDS+x}" ] && [ -n "$OPEN_COOLDOWN_SECONDS" ]; then
+    OPEN_COOLDOWN_FROM_ENV=1
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MENU_SCRIPT="$REPO_DIR/bin/menu.py"
 CFG_LOADER="$REPO_DIR/bin/config_loader.py"
 PYTHONPATH_DIR="$REPO_DIR/bin"
+MONITOR_BLOCK_REASON=""
 
 if [ "${MONITOR_TEST_MODE:-0}" != "1" ]; then
     if [ -f "$PID_FILE" ]; then
@@ -41,6 +49,75 @@ trap cleanup EXIT
 
 log_message() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
+}
+
+log_block_reason_if_changed() {
+    local reason="$1"
+    local previous=""
+
+    [ -n "$reason" ] || return
+    if [ -f "$LAST_BLOCK_REASON_FILE" ]; then
+        previous="$(<"$LAST_BLOCK_REASON_FILE")"
+    fi
+    if [ "$previous" != "$reason" ]; then
+        log_message "[INFO] Popup blocked: $reason"
+        printf '%s' "$reason" > "$LAST_BLOCK_REASON_FILE"
+    fi
+}
+
+clear_block_reason_state() {
+    rm -f "$LAST_BLOCK_REASON_FILE"
+}
+
+last_open_epoch() {
+    local value=""
+    if [ -f "$LAST_OPEN_EPOCH_FILE" ]; then
+        value="$(<"$LAST_OPEN_EPOCH_FILE")"
+    fi
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo "$value"
+    else
+        echo 0
+    fi
+}
+
+touch_last_open_epoch() {
+    date +%s > "$LAST_OPEN_EPOCH_FILE"
+}
+
+is_open_cooldown_active() {
+    local now last delta
+    now="$(date +%s)"
+    last="$(last_open_epoch)"
+    [ "$last" -gt 0 ] || return 1
+    delta=$((now - last))
+    if [ "$delta" -lt "$OPEN_COOLDOWN_SECONDS" ]; then
+        MONITOR_BLOCK_REASON="cooldown_active(${delta}s/${OPEN_COOLDOWN_SECONDS}s)"
+        return 0
+    fi
+    return 1
+}
+
+resolve_open_cooldown_seconds() {
+    local candidate=""
+    local default_value=30
+
+    if [ "${MONITOR_TEST_MODE:-0}" = "1" ] && [ -n "${TEST_OPEN_COOLDOWN_SECONDS:-}" ]; then
+        candidate="${TEST_OPEN_COOLDOWN_SECONDS}"
+    elif [ "$OPEN_COOLDOWN_FROM_ENV" = "1" ]; then
+        candidate="$OPEN_COOLDOWN_SECONDS"
+    else
+        candidate="$(read_config_value open_cooldown_seconds)"
+    fi
+
+    if ! [[ "$candidate" =~ ^[0-9]+$ ]]; then
+        candidate="$default_value"
+    fi
+    if [ "$candidate" -gt 600 ]; then
+        candidate=600
+    fi
+
+    OPEN_COOLDOWN_SECONDS="$candidate"
 }
 
 validate_menu_syntax() {
@@ -188,8 +265,14 @@ compute_terminal_geometry() {
 
 is_monitor_or_scrcpy_active() {
     local serial="$1"
+    MONITOR_BLOCK_REASON=""
     if [ "${MONITOR_TEST_MODE:-0}" = "1" ]; then
+        if [ "${MONITOR_HAS_MENU_PROCESS:-0}" = "1" ]; then
+            MONITOR_BLOCK_REASON="existing_menu_process"
+            return 0
+        fi
         if [ "${MONITOR_HAS_WINDOW:-0}" = "1" ] || [ "${MONITOR_HAS_SCRCPY:-0}" = "1" ]; then
+            MONITOR_BLOCK_REASON="existing_monitor_or_scrcpy"
             return 0
         fi
         return 1
@@ -197,14 +280,23 @@ is_monitor_or_scrcpy_active() {
 
     # If any monitor terminal is already open, avoid opening more popups.
     if pgrep -f "XYZ Monitor -" > /dev/null; then
+        MONITOR_BLOCK_REASON="existing_monitor_window"
+        return 0
+    fi
+
+    # If menu.py is active in any terminal/session, avoid opening another popup.
+    if pgrep -f "$MENU_SCRIPT" > /dev/null; then
+        MONITOR_BLOCK_REASON="existing_menu_process"
         return 0
     fi
 
     # If scrcpy is already running (same device or any device), do not spawn popups.
     if [ -n "$serial" ] && pgrep -f "scrcpy.*-s[[:space:]]*$serial" > /dev/null; then
+        MONITOR_BLOCK_REASON="existing_scrcpy_serial"
         return 0
     fi
     if pgrep -x scrcpy > /dev/null; then
+        MONITOR_BLOCK_REASON="existing_scrcpy_any"
         return 0
     fi
 
@@ -281,6 +373,7 @@ while true; do
         AUTO_DISCOVER="$(read_config_value auto_discover)"
         PAUSE_ACTIVE="$(read_config_value pause_active)"
     fi
+    resolve_open_cooldown_seconds
 
     save_current_serials "$CURRENT_SERIALS"
 
@@ -291,15 +384,25 @@ while true; do
     if [ -n "$DEVICE_SERIAL" ] && [ "$AUTO_START" = "true" ] && [ "$AUTO_DISCOVER" = "true" ] && [ "$PAUSE_ACTIVE" != "true" ]; then
         if [ "${MONITOR_TEST_MODE:-0}" = "1" ] || validate_menu_syntax; then
             if ! is_monitor_or_scrcpy_active "$DEVICE_SERIAL"; then
-                GEOMETRY="$(compute_terminal_geometry "$DEVICE_COUNT")"
-                if [ "${MONITOR_TEST_MODE:-0}" = "1" ]; then
-                    echo "OPEN_TERMINAL:$GEOMETRY:$DEVICE_SERIAL"
+                if is_open_cooldown_active; then
+                    log_block_reason_if_changed "$MONITOR_BLOCK_REASON"
                 else
-                    if ! open_menu_terminal "$GEOMETRY" "XYZ Monitor - $DEVICE_SERIAL"; then
-                        log_message "[WARNING] No compatible terminal emulator found. Popup launch skipped."
+                    GEOMETRY="$(compute_terminal_geometry "$DEVICE_COUNT")"
+                    if [ "${MONITOR_TEST_MODE:-0}" = "1" ]; then
+                        echo "OPEN_TERMINAL:$GEOMETRY:$DEVICE_SERIAL"
+                    else
+                        log_message "[INFO] Opening monitor terminal for serial $DEVICE_SERIAL."
+                        if open_menu_terminal "$GEOMETRY" "XYZ Monitor - $DEVICE_SERIAL"; then
+                            touch_last_open_epoch
+                            clear_block_reason_state
+                        else
+                            log_message "[WARNING] No compatible terminal emulator found. Popup launch skipped."
+                        fi
                     fi
+                    sleep 3
                 fi
-                sleep 3
+            else
+                log_block_reason_if_changed "$MONITOR_BLOCK_REASON"
             fi
         else
             log_message "[CRITICAL] Syntax error in menu/config loader. Terminal launch blocked."

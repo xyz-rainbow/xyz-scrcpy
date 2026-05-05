@@ -348,50 +348,156 @@ def render_menu(opts, idx, width):
 def settings_screen(cfg):
     temp_cfg = dict(cfg)
     temp_cfg["command_alias"] = normalize_alias(temp_cfg.get("command_alias", "xyz-scrcpy"))
+    temp_cfg["open_cooldown_seconds"] = int(temp_cfg.get("open_cooldown_seconds", 30) or 30)
     field_idx = 0
+    field_meta = {
+        "auto_start": {"kind": "bool", "label": "Auto-start monitor"},
+        "auto_discover": {"kind": "bool", "label": "Auto-discover devices"},
+        "open_cooldown_seconds": {
+            "kind": "int",
+            "label": "Open cooldown (seconds)",
+            "min": 0,
+            "max": 600,
+            "step": 5,
+            "prompt": "Enter open cooldown in seconds (0-600)",
+        },
+        "audio_target": {"kind": "enum_audio", "label": "Audio target"},
+        "active_recall": {"kind": "bool", "label": "Active Recall"},
+        "microphone_bus": {"kind": "bool", "label": f"Microphone Bus ({MIC_BUS_NAME})"},
+        "pause_on_exit": {"kind": "bool", "label": "Pause on EXIT"},
+        "exit_pause_minutes": {
+            "kind": "int",
+            "label": "Pause duration (minutes)",
+            "min": 1,
+            "max": 43200,
+            "step": 10,
+            "prompt": "Enter pause duration in minutes (1-43200)",
+        },
+        "command_alias": {
+            "kind": "text",
+            "label": "Command alias",
+            "prompt": "Enter new command alias",
+        },
+    }
+    sections = [
+        ("Launch behavior", ["auto_start", "auto_discover", "open_cooldown_seconds"]),
+        ("Audio", ["audio_target", "active_recall", "microphone_bus"]),
+        ("Session / Pause", ["pause_on_exit", "exit_pause_minutes"]),
+        ("General", ["command_alias"]),
+    ]
     fields = [
-        "command_alias",
+        "auto_start",
+        "auto_discover",
+        "open_cooldown_seconds",
         "audio_target",
         "active_recall",
         "microphone_bus",
-        "auto_start",
-        "auto_discover",
         "pause_on_exit",
         "exit_pause_minutes",
+        "command_alias",
         "APPLY",
         "CANCEL",
     ]
+
+    def clamp_int(value, min_value, max_value):
+        return max(min_value, min(max_value, value))
+
+    def format_field(name):
+        if name == "audio_target":
+            return f"{field_meta[name]['label']}: {str(temp_cfg.get(name, 'host')).upper()}"
+        if name in {"active_recall", "microphone_bus", "auto_start", "auto_discover", "pause_on_exit"}:
+            return f"{field_meta[name]['label']}: {'ON' if bool(temp_cfg.get(name, False)) else 'OFF'}"
+        if name in {"open_cooldown_seconds", "exit_pause_minutes"}:
+            range_hint = f"{field_meta[name]['min']}-{field_meta[name]['max']}"
+            return f"{field_meta[name]['label']}: {temp_cfg.get(name)} [{range_hint}]"
+        if name == "command_alias":
+            return f"{field_meta[name]['label']}: {temp_cfg.get(name, 'xyz-scrcpy')}"
+        if name == "APPLY":
+            return "[Apply]"
+        if name == "CANCEL":
+            return "[Cancel]"
+        return name
+
+    def apply_fast_edit(name, key):
+        meta = field_meta.get(name)
+        if not meta:
+            return
+        kind = meta["kind"]
+        if kind == "bool":
+            temp_cfg[name] = not bool(temp_cfg.get(name, False))
+            return
+        if kind == "enum_audio":
+            current = str(temp_cfg.get("audio_target", "host")).lower()
+            temp_cfg["audio_target"] = "device" if current == "host" else "host"
+            return
+        if kind == "int":
+            direction = 1 if key == "\x1b[C" else -1
+            step = int(meta.get("step", 1))
+            current = int(temp_cfg.get(name, meta.get("min", 0)) or meta.get("min", 0))
+            updated = current + (step * direction)
+            temp_cfg[name] = clamp_int(updated, int(meta.get("min", 0)), int(meta.get("max", 999999)))
+
+    def apply_precise_edit(name):
+        meta = field_meta.get(name)
+        if not meta:
+            return
+        kind = meta["kind"]
+        if kind == "text":
+            os.system("clear")
+            try:
+                entered = prompt_text_input(meta["prompt"], temp_cfg.get(name, "xyz-scrcpy"))
+            except EOFError:
+                entered = temp_cfg.get(name, "xyz-scrcpy")
+            temp_cfg[name] = normalize_alias(entered)
+            return
+        if kind == "int":
+            os.system("clear")
+            try:
+                entered = prompt_text_input(meta["prompt"], str(temp_cfg.get(name, meta.get("min", 0))))
+            except EOFError:
+                entered = str(temp_cfg.get(name, meta.get("min", 0)))
+            try:
+                parsed = int(entered)
+            except ValueError:
+                parsed = int(temp_cfg.get(name, meta.get("min", 0)) or meta.get("min", 0))
+            temp_cfg[name] = clamp_int(parsed, int(meta.get("min", 0)), int(meta.get("max", 999999)))
+            return
+        apply_fast_edit(name, "\x1b[C")
+
     while True:
         width = terminal_width()
         border = "=" * width
-        pause_toggle_label = "Start" if temp_cfg["pause_on_exit"] else "Pause"
         lines = [
             center_line(f"{GREEN}{border}{RESET}", width),
-            center_line(f"{MAGENTA}SETTINGS{RESET}", width),
+            center_line(f"{MAGENTA}SETTINGS - HYBRID EDIT{RESET}", width),
             center_line(f"{GREEN}{border}{RESET}", width),
             "",
         ]
-        rows = [
-            f"Command alias: {temp_cfg['command_alias']}",
-            f"Audio target: {temp_cfg.get('audio_target', 'host').upper()}",
-            f"Active Recall: {'ON' if temp_cfg.get('active_recall', False) else 'OFF'}",
-            f"Microphone Bus ({MIC_BUS_NAME}): {'ON' if temp_cfg.get('microphone_bus', False) else 'OFF'}",
-            f"Auto-start: {'ON' if temp_cfg['auto_start'] else 'OFF'}",
-            f"[Auto-Discover] [{'ON' if temp_cfg.get('auto_discover', True) else 'OFF'}]",
-            f"[{pause_toggle_label}] on EXIT",
-            f"Pause duration (minutes): {temp_cfg['exit_pause_minutes']}",
-            "[Apply]",
-            "[Cancel]",
-        ]
-        for i, row in enumerate(rows):
-            name = fields[i]
+        selected = fields[field_idx]
+        rendered_rows = []
+        for title, group_fields in sections:
+            rendered_rows.append((None, f"[{title}]"))
+            for name in group_fields:
+                rendered_rows.append((name, format_field(name)))
+            rendered_rows.append((None, ""))
+        rendered_rows.append((None, "[Actions]"))
+        rendered_rows.append(("APPLY", format_field("APPLY")))
+        rendered_rows.append(("CANCEL", format_field("CANCEL")))
+
+        for name, row in rendered_rows:
+            if name is None:
+                if row:
+                    lines.append(center_line(f"{MAGENTA}{trunc_text(row, width - 2)}{RESET}", width))
+                else:
+                    lines.append("")
+                continue
             text = trunc_text(row, width - 4)
             changed = name in temp_cfg and temp_cfg.get(name) != cfg.get(name)
             if changed:
                 text = f"{RED}{text}{RESET}"
-            lines.append(center_line((f"> {text}" if i == field_idx else f"  {text}"), width))
+            lines.append(center_line((f"> {text}" if name == selected else f"  {text}"), width))
         lines.append("")
-        lines.append(center_line("[LEFT/RIGHT] edit [ENTER] select/apply [ESC] back", width))
+        lines.append(center_line("[UP/DOWN] move [LEFT/RIGHT] quick edit [ENTER] precise/apply [ESC] back", width))
         os.system("clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
@@ -403,45 +509,11 @@ def settings_screen(cfg):
             field_idx = (field_idx + 1) % len(fields)
         elif key in ("\x1b[C", "\x1b[D", " "):
             name = fields[field_idx]
-            if name == "audio_target":
-                current = str(temp_cfg.get("audio_target", "host")).lower()
-                temp_cfg["audio_target"] = "device" if current == "host" else "host"
-            elif name == "active_recall":
-                temp_cfg["active_recall"] = not bool(temp_cfg.get("active_recall", False))
-            elif name == "microphone_bus":
-                temp_cfg["microphone_bus"] = not bool(temp_cfg.get("microphone_bus", False))
-            elif name == "auto_start":
-                temp_cfg["auto_start"] = not temp_cfg["auto_start"]
-            elif name == "auto_discover":
-                temp_cfg["auto_discover"] = not bool(temp_cfg.get("auto_discover", True))
-            elif name == "pause_on_exit":
-                temp_cfg["pause_on_exit"] = not temp_cfg["pause_on_exit"]
-            elif name == "exit_pause_minutes":
-                step = 10 if key == "\x1b[C" else -10
-                temp_cfg["exit_pause_minutes"] = max(1, int(temp_cfg["exit_pause_minutes"]) + step)
+            if name not in {"APPLY", "CANCEL"}:
+                apply_fast_edit(name, key)
         elif key == "\r":
             name = fields[field_idx]
-            if name == "audio_target":
-                current = str(temp_cfg.get("audio_target", "host")).lower()
-                temp_cfg["audio_target"] = "device" if current == "host" else "host"
-            elif name == "active_recall":
-                temp_cfg["active_recall"] = not bool(temp_cfg.get("active_recall", False))
-            elif name == "microphone_bus":
-                temp_cfg["microphone_bus"] = not bool(temp_cfg.get("microphone_bus", False))
-            elif name == "command_alias":
-                os.system("clear")
-                try:
-                    entered = prompt_text_input("Enter new command alias", temp_cfg["command_alias"])
-                except EOFError:
-                    entered = temp_cfg["command_alias"]
-                temp_cfg["command_alias"] = normalize_alias(entered)
-            elif name == "auto_start":
-                temp_cfg["auto_start"] = not temp_cfg["auto_start"]
-            elif name == "auto_discover":
-                temp_cfg["auto_discover"] = not bool(temp_cfg.get("auto_discover", True))
-            elif name == "pause_on_exit":
-                temp_cfg["pause_on_exit"] = not temp_cfg["pause_on_exit"]
-            elif name == "APPLY":
+            if name == "APPLY":
                 temp_cfg["command_alias"] = normalize_alias(temp_cfg["command_alias"])
                 temp_cfg = normalize_audio_preferences(temp_cfg)
                 save_config(temp_cfg)
@@ -449,6 +521,8 @@ def settings_screen(cfg):
                 return load_config(), "apply"
             elif name == "CANCEL":
                 return cfg, "cancel"
+            else:
+                apply_precise_edit(name)
         elif key == "\x1b":
             return cfg, "cancel"
 
