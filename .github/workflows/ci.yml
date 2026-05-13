@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r .requirements.txt
+
+      - name: Syntax check (Python)
+        run: >
+          python -m py_compile
+          install_xyz.py repair_xyz.py
+          bin/menu.py bin/config_loader.py bin/monitor.py
+          bin/check_and_repair.py bin/launch_with_checks.py
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Bash syntax (stub scripts)
+        if: runner.os != 'Windows'
+        run: bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh

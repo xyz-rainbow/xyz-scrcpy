@@ -15,14 +15,27 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 
 ## Requirements
 
-- `python3`
+- `python3` **3.10+** (runtime; see `pyproject.toml` / `.requirements.txt` for declared dependencies such as `psutil`).
 - `adb`
 - `scrcpy`
-- `bash`
+- `bash` (Linux/macOS: thin `*.sh` stubs that `exec` Python; checks and Windows flows do **not** require Git Bash).
 - Linux desktop with `systemd --user` and any common terminal emulator for full auto-start UX
 - macOS (Terminal app fallback via AppleScript)
-- Windows (best-effort monitor popup via PowerShell terminal fallback)
+- Windows: **`uv`** recommended to create `.venv` under the install directory during `install_xyz.py`; monitor runs via Task Scheduler.
 - Bundled upstream `scrcpy` in `vendor/` is aligned to latest stable tag `v3.3.4` and is preferred at runtime (fallback: system `scrcpy` in `PATH`)
+
+## Vendor directory and release packaging (Option A)
+
+- **Development clone** may contain a full `vendor/` tree (including Windows `.exe` / DLLs) for convenience on a single checkout.
+- **Linux release tarball** (`.tar.gz`): ship **without** Windows-only binaries (strip `*.exe`, `*.dll` from `vendor/` in the archive, or ship an empty `vendor/` and rely on system `scrcpy` / `adb`). Smaller download, matches typical Linux installs.
+- **Windows release zip**: ship **with** `vendor/` Windows binaries (or document running `setup_vendor.py` after extract if you publish a “slim” zip).
+
+## Installation summary by OS
+
+| OS | Install command | Service / auto-start | Python deps |
+|----|------------------|----------------------|-------------|
+| Linux | `python3 install_xyz.py` | `systemctl --user` user unit → `bin/monitor.sh` → `bin/monitor.py` | `pip install --user` / venv for `psutil` per installer |
+| Windows | `python install_xyz.py` (or `installer.bat` → repo setup + installer) | Task Scheduler `XYZScrcpyMonitor` → `bin/monitor.py` | `.venv` in install dir via **`uv`** |
 
 ## Architecture and Flows (SVG)
 
@@ -89,7 +102,7 @@ python3 install_xyz.py --action uninstall --yes
 - Audio mode is configurable as:
   - `output` (host audio enabled), or
   - `off` (launches with `--no-audio`).
-- Menu lock prevents duplicate concurrent menu sessions (`/tmp/xyz_menu.lock`).
+- Menu lock prevents duplicate concurrent menu sessions (lock file under the system temp directory; on Linux historically `/tmp/xyz_menu.lock`).
 
 ### Settings currently implemented
 
@@ -134,9 +147,9 @@ python3 install_xyz.py --action uninstall --yes
 
 ### Background monitor service behavior
 
-- Monitor loop runs in `bin/monitor.sh`.
-- PID lock avoids multiple monitor instances (`/tmp/xyz_monitor.pid`).
-- Tracks previous/current device serial snapshots (`/tmp/xyz_monitor_serials.state`).
+- Monitor loop runs in `bin/monitor.py` (invoked by `bin/monitor.sh` on Linux for compatibility).
+- PID lock avoids multiple monitor instances (state under the system temp directory, e.g. `xyz_monitor.pid`).
+- Tracks previous/current device serial snapshots (`xyz_monitor_serials.state` next to other monitor state files).
 - Performs Python syntax validation (`menu.py` + `config_loader.py`) before opening terminal.
 - Popup anti-spam protection:
   - does not open extra monitor terminal if one is already active,
@@ -147,14 +160,13 @@ python3 install_xyz.py --action uninstall --yes
 
 ### Pre-launch checks and fail-open flow
 
-- Alias launcher executes `bin/launch_with_checks.sh`.
-- Launcher runs `bin/check_and_repair.sh` unless installer already pre-ran checks.
+- Alias launcher runs `bin/launch_with_checks.py` (Windows installed copy) or `bin/launch_with_checks.sh` (Linux/macOS), which run checks then start the menu.
 - Checks include:
   - quick path on alias launch: syntax checks only (Python + shell scripts),
   - full unit test suite in background to avoid blocking startup.
 - Timeouts protect all major check/repair commands.
 - If checks fail:
-  - automatic repair is executed (`repair_xyz.sh`),
+  - automatic repair is executed (`repair_xyz.py`, or `repair_xyz.sh` on Unix if you use the wrapper),
   - checks are re-run.
 - Auto-repair logs include start/end markers, elapsed time, and exit code.
 - If still failing:
@@ -192,18 +204,37 @@ python3 install_xyz.py --action uninstall --yes
 - Service mode uses monitor conditions to avoid terminal popup spam.
 - Interactive menu is always opened through pre-check gate when launched via alias.
 
+## CI and local validation
+
+Same checks as [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (Linux runs `bash -n` on stubs; skip that step on Windows):
+
+```bash
+pip install -r .requirements.txt
+python -m py_compile install_xyz.py repair_xyz.py \
+  bin/menu.py bin/config_loader.py bin/monitor.py \
+  bin/check_and_repair.py bin/launch_with_checks.py
+python -m unittest discover -s tests -p "test_*.py"
+bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
+```
+
 ## Repository Layout
 
+- `pyproject.toml` / `.requirements.txt` — declared Python dependency versions (`psutil`).
+- `CHANGELOG.md` — published version history.
 - `install_xyz.py` — multi-OS installer and uninstaller.
 - `bin/menu.py` — interactive terminal UI.
-- `bin/monitor.sh` — background monitor loop.
-- `bin/launch_with_checks.sh` — launcher with pre-check gate.
-- `bin/check_and_repair.sh` — checks + repair + fail-open status.
+- `bin/monitor.py` — background monitor loop (shared implementation).
+- `bin/monitor.sh` — thin stub that invokes `monitor.py` (keeps systemd `ExecStart` stable).
+- `bin/launch_with_checks.py` / `bin/launch_with_checks.sh` — launcher with pre-check gate.
+- `bin/check_and_repair.py` / `bin/check_and_repair.sh` — checks + repair + fail-open status.
 - `bin/config_loader.py` — config defaults and persistence.
 - `tests/` — installer, monitor, and shell flow tests.
 - `systemd/scrcpy-auto.service` — service template/reference.
 - `config/` — runtime config and logs.
+- `docs/launch-linux-strategy.md` — why `monitor.sh` / `launch_with_checks.sh` remain on Linux.
+- `docs/SMOKE_FROM_RELEASE.md` — smoke checks from `.tar.gz` / `.zip` without `git clone`.
 - `docs/audio-mic-restart-risks-walkthrough.md` — risks and operational walkthrough for audio/mic/restart behavior.
+- `docs/implementation-phases.md` — phased implementation checklist (multi-OS monitor, `uv`, CI, releases); keep in sync with the Cursor implementation plan when iterating.
 
 ## Feature to File Map
 
@@ -220,26 +251,16 @@ python3 install_xyz.py --action uninstall --yes
 | Pause activation on exit | `bin/menu.py` | Persists pause state/timer in config |
 | Config defaults and normalization | `bin/config_loader.py` | Backward compatibility and type coercion |
 | Config persistence (`config.json`) | `bin/config_loader.py` | Atomic save via temp file replace |
-| Auto monitor loop | `bin/monitor.sh` | Polls devices and decides popup launch with Linux/macOS/Windows terminal fallbacks |
-| Popup anti-spam guard | `bin/monitor.sh` | Detects active monitor terminal or `scrcpy` process |
-| Reconnect-aware pause resume | `bin/monitor.sh` | Uses serial snapshots and pause flags |
-| Pre-launch check gate | `bin/launch_with_checks.sh` | Runs checks, handles fail-open prompt |
-| Checks + auto-repair pipeline | `bin/check_and_repair.sh` | Syntax/tests, repair retry, check log |
+| Auto monitor loop | `bin/monitor.py` | Invoked via `bin/monitor.sh` on Linux for systemd compatibility |
+| Popup anti-spam guard | `bin/monitor.py` | Detects active monitor terminal or `scrcpy` process |
+| Reconnect-aware pause resume | `bin/monitor.py` | Uses serial snapshots and pause flags |
+| Pre-launch check gate | `bin/launch_with_checks.py` | `.sh` is a thin stub on Linux/macOS |
+| Checks + auto-repair pipeline | `bin/check_and_repair.py` | `.sh` delegates here; `repair_xyz.py` for repair |
 | Installer interactive flow | `install_xyz.py` | Install/uninstall/sync-alias, prompts and cleanup |
 | Service install/enable/disable/stop | `install_xyz.py` | OS-specific handling (Linux/macOS/Windows) |
 | Alias creation and synchronization | `install_xyz.py` | Launcher generation + managed launcher cleanup |
 | Runtime logs and diagnostics | `config/check.log`, `config/scrcpy.log` | Check pipeline and service output |
 | Unit/integration behavior coverage | `tests/` | Installer, monitor, launcher/check shell flows |
-
-## Validation
-
-```bash
-python3 -m py_compile install_xyz.py bin/menu.py bin/config_loader.py
-bash -n bin/monitor.sh
-bash -n bin/check_and_repair.sh
-bash -n bin/launch_with_checks.sh
-python3 -m unittest discover -s tests -p "test_*.py"
-```
 
 ## Operations
 
@@ -251,7 +272,7 @@ systemctl --user restart scrcpy-auto.service
 systemctl --user status scrcpy-auto.service --no-pager -n 20
 
 # Manual repair workflow
-./repair_xyz.sh
+python3 repair_xyz.py
 ```
 
 ## Past Visual Versions

@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -106,12 +107,15 @@ def launcher_path(os_name: str, launcher_dir: Path, alias: str) -> Path:
 def _is_managed_launcher(launcher_file: Path, install_dir: Path) -> bool:
     if not launcher_file.exists() or not launcher_file.is_file():
         return False
-    marker = str(install_dir / "bin" / "launch_with_checks.sh")
+    markers = (
+        str(install_dir / "bin" / "launch_with_checks.sh"),
+        str(install_dir / "bin" / "launch_with_checks.py"),
+    )
     try:
         content = launcher_file.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
-    return marker in content
+    return any(m in content for m in markers)
 
 
 def remove_managed_launchers(paths: dict[str, Path], os_name: str, primary_alias: str) -> None:
@@ -142,10 +146,39 @@ def copy_project(src_root: Path, dst_root: Path) -> None:
         ".cursor",
         ".claude",
         "agent-transcripts",
+        ".venv",
     )
     if dst_root.exists():
         shutil.rmtree(dst_root)
     shutil.copytree(src_root, dst_root, ignore=ignore)
+
+
+def python_for_post_install(install_dir: Path, os_name: str) -> str:
+    if os_name == "windows":
+        return str(install_dir / ".venv" / "Scripts" / "python.exe")
+    return shutil.which("python3") or "python3"
+
+
+def ensure_windows_runtime_venv(install_dir: Path) -> None:
+    uv = shutil.which("uv")
+    if not uv:
+        raise RuntimeError(
+            "Windows install requires 'uv' on PATH to create the runtime .venv. "
+            "Install uv from https://github.com/astral-sh/uv"
+        )
+    venv_dir = install_dir / ".venv"
+    run_cmd([uv, "venv", str(venv_dir)], check=True)
+    req = install_dir / ".requirements.txt"
+    if not req.is_file():
+        raise FileNotFoundError(f"Missing .requirements.txt after install copy: {req}")
+    run_cmd([uv, "pip", "install", "-r", str(req)], check=True)
+
+
+def ensure_linux_psutil() -> None:
+    py = shutil.which("python3")
+    if not py:
+        return
+    run_cmd([py, "-m", "pip", "install", "--user", "psutil>=5.9"], check=False)
 
 
 def write_launcher(os_name: str, launcher: Path, install_dir: Path) -> None:
@@ -155,9 +188,14 @@ def write_launcher(os_name: str, launcher: Path, install_dir: Path) -> None:
 bash "{install_dir / 'bin' / 'launch_with_checks.sh'}"
 """
     else:
-        content = f"""@echo off
-bash "{install_dir / 'bin' / 'launch_with_checks.sh'}"
-"""
+        win_inst = str(install_dir).replace("/", "\\")
+        vpy = str(install_dir / ".venv" / "Scripts" / "python.exe").replace("/", "\\")
+        lpy = str(install_dir / "bin" / "launch_with_checks.py").replace("/", "\\")
+        content = (
+            "@echo off\r\n"
+            f'set "PATH={win_inst}\\vendor;%PATH%"\r\n'
+            f'"{vpy}" "{lpy}"\r\n'
+        )
     launcher.write_text(content, encoding="utf-8")
     if os_name in ("linux", "darwin"):
         launcher.chmod(0o755)
@@ -249,7 +287,12 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
         run_cmd(["launchctl", "unload", str(service_file)], check=False)
         run_cmd(["launchctl", "load", str(service_file)])
         return
-    menu_script = install_dir / "bin" / "menu.py"
+    menu_script = install_dir / "bin" / "monitor.py"
+    pythonw = install_dir / ".venv" / "Scripts" / "pythonw.exe"
+    inst = str(install_dir).replace("/", "\\")
+    pyw = str(pythonw).replace("/", "\\")
+    mon = str(menu_script).replace("/", "\\")
+    task_tr = f'cmd /c cd /d "{inst}" && set "PATH={inst}\\vendor;%PATH%" && "{pyw}" "{mon}"'
     run_cmd(
         [
             "schtasks",
@@ -260,7 +303,7 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
             "/tn",
             TASK_NAME,
             "/tr",
-            f'python "{menu_script}"',
+            task_tr,
         ]
     )
     if not enable_service:
@@ -307,13 +350,15 @@ def check_dependencies(os_name: str) -> None:
         print("Notice: 'pactl' not found. Microphone Bus feature (xyz-mic-input) will fallback gracefully.")
 
 
-def run_post_install_checks(install_dir: Path) -> tuple[str, str]:
-    check_script = install_dir / "bin" / "check_and_repair.sh"
+def run_post_install_checks(install_dir: Path, os_name: str) -> tuple[str, str]:
+    check_script = install_dir / "bin" / "check_and_repair.py"
+    py = python_for_post_install(install_dir, os_name)
     proc = subprocess.run(
-        ["bash", str(check_script)],
+        [py, str(check_script)],
         text=True,
         capture_output=True,
         check=False,
+        cwd=str(install_dir),
     )
     status = (proc.stdout or "").strip().splitlines()
     status_code = status[-1].strip() if status else "UNKNOWN"
@@ -338,7 +383,8 @@ def show_check_log(install_dir: Path) -> None:
 
 
 def open_initial_menu(os_name: str, install_dir: Path, prechecked_status: str | None = None) -> None:
-    launcher = install_dir / "bin" / "launch_with_checks.sh"
+    launcher_py = install_dir / "bin" / "launch_with_checks.py"
+    py = python_for_post_install(install_dir, os_name)
     env_prefix = ""
     if prechecked_status:
         env_prefix = f"XYZ_CHECKS_ALREADY_DONE=1 XYZ_CHECKS_STATUS={prechecked_status} "
@@ -352,20 +398,27 @@ def open_initial_menu(os_name: str, install_dir: Path, prechecked_status: str | 
                 "--",
                 "bash",
                 "-lc",
-                f"{env_prefix}XYZ_LAUNCHER_WINDOW=1 bash \"{launcher}\"",
+                f"{env_prefix}XYZ_LAUNCHER_WINDOW=1 {shlex.quote(py)} {shlex.quote(str(launcher_py))}",
             ],
             check=False,
         )
         return
+    if os_name == "windows":
+        env = dict(os.environ)
+        if prechecked_status:
+            env["XYZ_CHECKS_ALREADY_DONE"] = "1"
+            env["XYZ_CHECKS_STATUS"] = prechecked_status
+        subprocess.run([py, str(launcher_py)], check=False, cwd=str(install_dir), env=env)
+        return
     if prechecked_status:
         subprocess.run(
-            ["bash", str(launcher)],
+            [py, str(launcher_py)],
             check=False,
             text=True,
             env={**os.environ, "XYZ_CHECKS_ALREADY_DONE": "1", "XYZ_CHECKS_STATUS": prechecked_status},
         )
         return
-    run_cmd(["bash", str(launcher)], check=False)
+    run_cmd([py, str(launcher_py)], check=False)
 
 
 def do_install(
@@ -382,6 +435,10 @@ def do_install(
     do_uninstall(paths, os_name, remove_app_files=True, remove_repo_copy=False)
     previous_alias = read_installed_alias(paths["install_dir"])
     copy_project(src_root, paths["install_dir"])
+    if os_name == "windows":
+        ensure_windows_runtime_venv(paths["install_dir"])
+    elif os_name == "linux":
+        ensure_linux_psutil()
     save_alias_to_config(paths["install_dir"], alias)
     launch_path = launcher_path(os_name, paths["launcher_dir"], alias)
     previous_path = launcher_path(os_name, paths["launcher_dir"], previous_alias)
@@ -398,7 +455,7 @@ def do_install(
 
     if run_tests_and_log:
         print("Running tests and validations now. Please wait...")
-        status, summary = run_post_install_checks(paths["install_dir"])
+        status, summary = run_post_install_checks(paths["install_dir"], os_name)
         print(summary)
         show_check_log(paths["install_dir"])
         if status == "FAIL_OPEN":

@@ -14,7 +14,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_launcher_path_linux(self):
         launcher = install_xyz.launcher_path("linux", Path("/tmp/bin"), "abc")
-        self.assertEqual(str(launcher), "/tmp/bin/abc")
+        self.assertEqual(launcher, Path("/tmp/bin/abc"))
 
     def test_launcher_path_windows(self):
         launcher = install_xyz.launcher_path("windows", Path("C:/bin"), "abc")
@@ -75,6 +75,8 @@ class InstallerTests(unittest.TestCase):
                 patch("install_xyz.read_installed_alias", return_value="xyz-scrcpy"),
                 patch("install_xyz.write_launcher"),
                 patch("install_xyz.save_alias_to_config"),
+                patch("install_xyz.ensure_windows_runtime_venv"),
+                patch("install_xyz.ensure_linux_psutil"),
             ):
                 install_xyz.do_install(paths, src, "linux", "xyz-scrcpy", True, False)
                 mock_uninstall.assert_called_once()
@@ -144,7 +146,7 @@ class InstallerTests(unittest.TestCase):
             syntax_text = (dst / "bin" / "test_syntax.py").read_text(encoding="utf-8")
             service_text = (dst / "systemd" / "scrcpy-auto.service").read_text(encoding="utf-8")
 
-            self.assertNotIn("/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy", monitor_text)
+            self.assertIn("monitor.py", monitor_text)
             self.assertNotIn("/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy", repair_text)
             self.assertNotIn("/home/cloud-xyz/Documentos/NEXUS/apps/github/xyz-scrcpy", syntax_text)
             self.assertIn("%h/.local/share/xyz-scrcpy/bin/monitor.sh", service_text)

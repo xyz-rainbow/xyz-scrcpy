@@ -1,1 +1,2 @@
-scrcpy==3.3.4
+﻿# Kept in sync with pyproject.toml [project.dependencies] for `uv pip install -r .requirements.txt`
+psutil>=5.9

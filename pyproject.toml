@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xyz-scrcpy"
+version = "1.0.0"
+description = "Interactive Android launcher and monitor on top of scrcpy"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools]
+py-modules = []

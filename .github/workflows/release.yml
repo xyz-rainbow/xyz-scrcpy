@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r .requirements.txt
+
+      - name: Syntax check (Python)
+        run: >
+          python -m py_compile
+          install_xyz.py repair_xyz.py
+          bin/menu.py bin/config_loader.py bin/monitor.py
+          bin/check_and_repair.py bin/launch_with_checks.py
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Bash syntax (stub scripts)
+        if: runner.os != 'Windows'
+        run: bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read version from pyproject.toml
+        id: meta
+        run: |
+          VERSION=$(python -c "import re; t=open('pyproject.toml',encoding='utf-8').read(); print(re.search(r'^version\s*=\s*\"([^\"]+)\"', t, re.M).group(1))")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dirname=xyz-scrcpy-$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build archives
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          DIRNAME: ${{ steps.meta.outputs.dirname }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist stage-linux stage-win
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude 'dist' \
+            --exclude 'stage-linux' \
+            --exclude 'stage-win' \
+            ./ "stage-linux/$DIRNAME/"
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude 'dist' \
+            --exclude 'stage-linux' \
+            --exclude 'stage-win' \
+            ./ "stage-win/$DIRNAME/"
+          find "stage-linux/$DIRNAME/vendor" -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dll' \) -delete 2>/dev/null || true
+          (cd stage-linux && tar czvf "../dist/xyz-scrcpy-${VERSION}-linux.tar.gz" "$DIRNAME")
+          (cd stage-win && zip -rq "../dist/xyz-scrcpy-${VERSION}-win64.zip" "$DIRNAME")
+          (cd dist && sha256sum xyz-scrcpy-${VERSION}-linux.tar.gz xyz-scrcpy-${VERSION}-win64.zip > SHA256SUMS)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            **Requirements:** Python 3.10+, `adb`, `scrcpy` (or use `vendor/` where shipped). On Windows, install [uv](https://github.com/astral-sh/uv) before running `install_xyz.py`.
+
+            **Linux:** extract `xyz-scrcpy-*-linux.tar.gz`, then `python3 install_xyz.py`. Windows `.exe`/`.dll` in `vendor/` are omitted (Option A).
+
+            **Windows:** extract `xyz-scrcpy-*-win64.zip`, run `installer.bat` or create `.venv` with `uv`, then `python install_xyz.py`.
+
+            **Verify:** `sha256sum -c SHA256SUMS` (Linux) or compare hashes from `SHA256SUMS`.
+
+            Smoke checklist: `docs/SMOKE_FROM_RELEASE.md` in the extracted tree.
+          files: |
+            dist/xyz-scrcpy-*-linux.tar.gz
+            dist/xyz-scrcpy-*-win64.zip
+            dist/SHA256SUMS

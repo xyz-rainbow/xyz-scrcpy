@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import os
 import re
 import select
@@ -7,9 +10,15 @@ import shutil
 import signal
 import subprocess
 import sys
-import termios
+try:
+    import termios
+except ImportError:
+    termios = None
 import time
-import tty
+try:
+    import tty
+except ImportError:
+    tty = None
 from pathlib import Path
 
 from config_loader import load_config, save_config
@@ -36,9 +45,10 @@ NEON_PINK = "\033[38;5;213m"
 
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 ROOT_DIR = Path(__file__).resolve().parent.parent
-LOCK_PATH = "/tmp/xyz_menu.lock"
+import tempfile
+LOCK_PATH = os.path.join(tempfile.gettempdir(), "xyz_menu.lock")
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
-SCRCPY_VENDOR_BIN = ROOT_DIR / "vendor" / "scrcpy"
+SCRCPY_VENDOR_BIN = ROOT_DIR / "vendor" / ("scrcpy.exe" if os.name == "nt" else "scrcpy")
 LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
 BANNER_COLORS = {"ERROR": RED, "WARN": ORANGE, "OK": GREEN}
@@ -47,25 +57,40 @@ ESCAPE_READ_TIMEOUT = 0.03
 
 
 def get_key():
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch != "\x1b":
-            return ch
+    if os.name != 'nt':
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+            if ch != "\x1b":
+                return ch
 
-        seq = ch
-        ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
-        if not ready:
-            return "\x1b"
-        seq += sys.stdin.read(1)
-        ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
-        if ready:
+            seq = ch
+            ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
+            if not ready:
+                return "\x1b"
             seq += sys.stdin.read(1)
-        return seq
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
+            if ready:
+                seq += sys.stdin.read(1)
+            return seq
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    else:
+        import msvcrt
+        ch = msvcrt.getch()
+        if ch == b'\xe0':
+            ch2 = msvcrt.getch()
+            if ch2 == b'H': return "\x1b[A"
+            if ch2 == b'P': return "\x1b[B"
+            if ch2 == b'M': return "\x1b[C"
+            if ch2 == b'K': return "\x1b[D"
+        if ch == b'\r': return "\r"
+        try:
+            return ch.decode('utf-8')
+        except:
+            return ch.decode('latin-1')
 
 
 def visible_len(text):
@@ -207,7 +232,7 @@ def show_paginated_selection(
         lines.append(center_line(footer_hint, width))
         lines.extend(render_brand_footer(width))
 
-        os.system("clear")
+        os.system("cls" if os.name == "nt" else "clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
 
@@ -242,7 +267,7 @@ def pick_path_with_hybrid_selector(title, mode_title, ask_directory=False, banne
     mode = mode_options[mode_idx]
 
     if mode == "Manual path":
-        os.system("clear")
+        os.system("cls" if os.name == "nt" else "clear")
         try:
             entered = prompt_text_input(title, "")
         except EOFError:
@@ -554,6 +579,32 @@ def ensure_microphone_bus(enabled):
         return False
 
 
+def kill_scrcpy_for_serial(serial: str) -> None:
+    """Stop scrcpy instances bound to ``serial`` (psutil when available, else pkill on Unix)."""
+    try:
+        import psutil
+    except ImportError:
+        if os.name != "nt":
+            subprocess.run(
+                ["pkill", "-f", f"scrcpy.*-s[[:space:]]*{serial}"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return
+    pat = re.compile(rf"(scrcpy|scrcpy\.exe).*-s\s+{re.escape(serial)}\b", re.I)
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info.get("cmdline") or ())
+        except (psutil.Error, TypeError):
+            continue
+        if pat.search(cmd):
+            try:
+                proc.terminate()
+            except psutil.Error:
+                pass
+
+
 def launch_scrcpy(serial, cfg):
     cfg = normalize_audio_preferences(cfg)
     audio_target = str(cfg.get("audio_target", "host")).lower()
@@ -603,7 +654,7 @@ def render_menu(opts, idx, width, banner=None):
 
 
 def confirm_action(message, default_no=True):
-    os.system("clear")
+    os.system("cls" if os.name == "nt" else "clear")
     suffix = "[y/N]" if default_no else "[Y/n]"
     try:
         response = input(f"{message} {suffix}: ").strip().lower()
@@ -641,7 +692,7 @@ def apps_submenu(serial, banner=None):
     while True:
         width = terminal_width()
         lines = render_menu([f"{opt} ({serial})" if opt != "Back" else opt for opt in options], idx, width, banner=local_banner)
-        os.system("clear")
+        os.system("cls" if os.name == "nt" else "clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
 
@@ -763,7 +814,7 @@ def device_submenu(device, cfg, banner=None):
         width = terminal_width()
         decorated = [f"{opt} ({serial})" if opt != "Back" else opt for opt in options]
         lines = render_menu(decorated, idx, width, banner=local_banner)
-        os.system("clear")
+        os.system("cls" if os.name == "nt" else "clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
 
@@ -910,7 +961,7 @@ def settings_screen(cfg):
             return
         kind = meta["kind"]
         if kind == "text":
-            os.system("clear")
+            os.system("cls" if os.name == "nt" else "clear")
             try:
                 entered = prompt_text_input(meta["prompt"], temp_cfg.get(name, "xyz-scrcpy"))
             except EOFError:
@@ -918,7 +969,7 @@ def settings_screen(cfg):
             temp_cfg[name] = normalize_alias(entered)
             return
         if kind == "int":
-            os.system("clear")
+            os.system("cls" if os.name == "nt" else "clear")
             try:
                 entered = prompt_text_input(meta["prompt"], str(temp_cfg.get(name, meta.get("min", 0))))
             except EOFError:
@@ -966,7 +1017,7 @@ def settings_screen(cfg):
         lines.append("")
         lines.append(center_line("[UP/DOWN] move [LEFT/RIGHT] quick edit [ENTER] precise/apply [ESC] back", width))
         lines.extend(render_brand_footer(width))
-        os.system("clear")
+        os.system("cls" if os.name == "nt" else "clear")
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
 
@@ -1005,10 +1056,12 @@ def activate_pause_on_exit(cfg):
 
 
 def main():
-    signal.signal(signal.SIGWINCH, lambda *_: None)
+    if hasattr(signal, "SIGWINCH"):
+        signal.signal(signal.SIGWINCH, lambda *_: None)
     lock_file = open(LOCK_PATH, "w", encoding="utf-8")
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fcntl:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         sys.exit(0)
 
@@ -1029,7 +1082,7 @@ def main():
             if idx >= len(opts):
                 idx = 0
 
-            os.system("clear")
+            os.system("cls" if os.name == "nt" else "clear")
             sys.stdout.write("\n".join(render_menu(opts, idx, width, banner=banner)))
             sys.stdout.flush()
 
@@ -1055,12 +1108,7 @@ def main():
                         target_serial = devices[0]["serial"]
                     if target_serial:
                         cfg = normalize_audio_preferences(cfg)
-                        subprocess.run(
-                            ["pkill", "-f", f"scrcpy.*-s[[:space:]]*{target_serial}"],
-                            check=False,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
+                        kill_scrcpy_for_serial(target_serial)
                         time.sleep(0.4)
                         launch_scrcpy(target_serial, cfg)
                         cfg["applied_audio_target"] = cfg.get("audio_target", "host")
@@ -1086,8 +1134,15 @@ def main():
                 break
     finally:
         if os.path.exists(LOCK_PATH):
-            os.remove(LOCK_PATH)
-        os.system("clear")
+            try:
+                lock_file.close()
+            except:
+                pass
+            try:
+                os.remove(LOCK_PATH)
+            except OSError:
+                pass
+        os.system("cls" if os.name == "nt" else "clear")
 
 
 if __name__ == "__main__":

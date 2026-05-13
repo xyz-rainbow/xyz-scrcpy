@@ -70,7 +70,7 @@ class DeviceMenuHelpersTests(unittest.TestCase):
     def test_hybrid_picker_manual_mode(self, _select_mode, _prompt):
         path, banner = menu.pick_path_with_hybrid_selector("APK file path", "PICKER", ask_directory=False)
         self.assertIsNone(banner)
-        self.assertEqual(str(path), "/tmp/demo.apk")
+        self.assertEqual(path, Path("/tmp/demo.apk"))
 
     @patch("menu.pick_path_with_gui", return_value=None)
     @patch("menu.show_simple_selection", return_value=0)
@@ -79,11 +79,13 @@ class DeviceMenuHelpersTests(unittest.TestCase):
         self.assertIsNone(path)
         self.assertEqual(banner["level"], "WARN")
 
+    @patch("menu.os.system")
+    @patch("menu.sys.stdout.write")
     @patch("menu.get_key")
     @patch("menu.load_config", return_value={"saved": True})
     @patch("menu.save_config")
     @patch("menu.launch_scrcpy")
-    def test_device_submenu_screen_share(self, _launch, _save, _load, mock_get_key):
+    def test_device_submenu_screen_share(self, _launch, _save, _load, mock_get_key, _stdout_write, _os_system):
         cfg = {
             "audio_target": "host",
             "active_recall": False,
