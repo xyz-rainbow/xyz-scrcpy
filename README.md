@@ -37,6 +37,14 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 | Linux | `python3 install_xyz.py` | `systemctl --user` user unit → `bin/monitor.sh` → `bin/monitor.py` | `pip install --user` / venv for `psutil` per installer |
 | Windows | `python install_xyz.py` (or `installer.bat` → repo setup + installer) | Task Scheduler `XYZScrcpyMonitor` → `bin/monitor.py` | `.venv` in install dir via **`uv`** |
 
+### Windows: dev clone launcher and CLI on PATH
+
+- **Repo dev launcher**: from a clone with `.venv` and `vendor\` populated, run `.\xyz-scrcpy.cmd` in PowerShell or CMD. It prepends `vendor` to `PATH` and runs `bin\launch_with_checks.py` with `.venv\Scripts\python.exe`. If the venv is missing, create it (e.g. run `install_xyz.py` or `uv venv` plus `pip install -r .requirements.txt`) before using the script.
+- **Installed CLI**: a successful Windows install adds `%LOCALAPPDATA%\xyz-scrcpy\cli` to your **user** `PATH` and drops `<alias>.cmd` there so you can run your chosen alias from any terminal. Uninstall removes that segment and the shim files when possible.
+- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, Python resolution, and a Task Scheduler query for `XYZScrcpyMonitor`. Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install.
+- **Installer EXE**: Inno Setup script at `packaging/windows/setup.iss` (build with Inno Setup 6’s `ISCC.exe`). Unsigned builds may trigger **SmartScreen**; use “More info” → “Run anyway” if you trust the artifact. The wizard requires **Python 3.10+** (`py -3` or `python`) on `PATH` before files are staged.
+- **Python**: avoid the embeddable distribution without `pip`; the installer checks for `import pip` when resolving the runtime.
+
 ## Architecture and Flows (SVG)
 
 ![Architecture diagram](docs/assets/architecture.svg)
@@ -210,7 +218,7 @@ Same checks as [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (Linux run
 
 ```bash
 pip install -r .requirements.txt
-python -m py_compile install_xyz.py repair_xyz.py \
+python -m py_compile install_xyz.py win_path_shim.py repair_xyz.py \
   bin/menu.py bin/config_loader.py bin/monitor.py \
   bin/check_and_repair.py bin/launch_with_checks.py
 python -m unittest discover -s tests -p "test_*.py"
@@ -222,6 +230,9 @@ bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
 - `pyproject.toml` / `.requirements.txt` — declared Python dependency versions (`psutil`).
 - `CHANGELOG.md` — published version history.
 - `install_xyz.py` — multi-OS installer and uninstaller.
+- `win_path_shim.py` — Windows user `PATH` shim, `%LOCALAPPDATA%\xyz-scrcpy\cli` `.cmd` launcher, backup/marker helpers.
+- `xyz-scrcpy.cmd` — Windows **development** entry from repo root (requires local `.venv`).
+- `packaging/windows/setup.iss` — Inno Setup 6 definition for a low-privilege staging installer that runs `install_xyz.py` / uninstall.
 - `bin/menu.py` — interactive terminal UI.
 - `bin/monitor.py` — background monitor loop (shared implementation).
 - `bin/monitor.sh` — thin stub that invokes `monitor.py` (keeps systemd `ExecStart` stable).
@@ -256,7 +267,8 @@ bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
 | Reconnect-aware pause resume | `bin/monitor.py` | Uses serial snapshots and pause flags |
 | Pre-launch check gate | `bin/launch_with_checks.py` | `.sh` is a thin stub on Linux/macOS |
 | Checks + auto-repair pipeline | `bin/check_and_repair.py` | `.sh` delegates here; `repair_xyz.py` for repair |
-| Installer interactive flow | `install_xyz.py` | Install/uninstall/sync-alias, prompts and cleanup |
+| Installer interactive flow | `install_xyz.py` | Install/uninstall/sync-alias/diagnose, prompts and cleanup |
+| Windows PATH CLI shim | `win_path_shim.py` | User `PATH` segment, `%LOCALAPPDATA%\xyz-scrcpy\cli` shims, backup/marker |
 | Service install/enable/disable/stop | `install_xyz.py` | OS-specific handling (Linux/macOS/Windows) |
 | Alias creation and synchronization | `install_xyz.py` | Launcher generation + managed launcher cleanup |
 | Runtime logs and diagnostics | `config/check.log`, `config/scrcpy.log` | Check pipeline and service output |

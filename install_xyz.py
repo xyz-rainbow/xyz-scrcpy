@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import platform
 import re
@@ -13,6 +14,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import win_path_shim as wps
 
 
 APP_NAME = "xyz-scrcpy"
@@ -339,12 +342,15 @@ def uninstall_service(os_name: str, service_file: Path) -> None:
         service_file.unlink()
 
 
-def check_dependencies(os_name: str) -> None:
+def check_dependencies(os_name: str, *, verbose: bool = False) -> None:
     required = ["adb", "scrcpy"]
     required.insert(0, "python" if os_name == "windows" else "python3")
     missing = [dep for dep in required if shutil.which(dep) is None]
     if missing:
-        print(f"Warning: Missing dependencies: {', '.join(missing)}")
+        msg = f"Warning: Missing dependencies: {', '.join(missing)}"
+        print(msg)
+        if verbose:
+            logging.getLogger("xyz_install").info(msg)
         print("Installation will continue, but runtime may fail until dependencies are installed.")
     if os_name == "linux" and shutil.which("pactl") is None:
         print("Notice: 'pactl' not found. Microphone Bus feature (xyz-mic-input) will fallback gracefully.")
@@ -428,30 +434,49 @@ def do_install(
     alias: str,
     enable_service: bool,
     run_tests_and_log: bool,
+    *,
+    verbose: bool = False,
 ) -> None:
+    if verbose:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     print(f"Installing to: {paths['install_dir']}")
-    check_dependencies(os_name)
+    check_dependencies(os_name, verbose=verbose)
+    install_root = paths["install_dir"]
+    previous_alias = read_installed_alias(install_root) if install_root.exists() else DEFAULT_ALIAS
     print("Running clean install (removing previous installation first)...")
     do_uninstall(paths, os_name, remove_app_files=True, remove_repo_copy=False)
-    previous_alias = read_installed_alias(paths["install_dir"])
-    copy_project(src_root, paths["install_dir"])
-    if os_name == "windows":
-        ensure_windows_runtime_venv(paths["install_dir"])
-    elif os_name == "linux":
-        ensure_linux_psutil()
-    save_alias_to_config(paths["install_dir"], alias)
-    launch_path = launcher_path(os_name, paths["launcher_dir"], alias)
-    previous_path = launcher_path(os_name, paths["launcher_dir"], previous_alias)
-    if previous_path != launch_path and previous_path.exists():
-        previous_path.unlink()
-    write_launcher(os_name, launch_path, paths["install_dir"])
-    install_service(os_name, paths["service_file"], paths["install_dir"], enable_service)
+    try:
+        copy_project(src_root, paths["install_dir"])
+        if os_name == "windows":
+            ensure_windows_runtime_venv(paths["install_dir"])
+        elif os_name == "linux":
+            ensure_linux_psutil()
+        save_alias_to_config(paths["install_dir"], alias)
+        launch_path = launcher_path(os_name, paths["launcher_dir"], alias)
+        previous_path = launcher_path(os_name, paths["launcher_dir"], previous_alias)
+        if previous_path != launch_path and previous_path.exists():
+            previous_path.unlink()
+        write_launcher(os_name, launch_path, paths["install_dir"])
+        install_service(os_name, paths["service_file"], paths["install_dir"], enable_service)
+        if os_name == "windows":
+            pl = paths["install_dir"] / "config" / "path_changes.log"
+            try:
+                wps.windows_install_cli_shim(paths["install_dir"], alias, path_log=pl)
+            except Exception:
+                wps.windows_uninstall_cli_shim(paths["install_dir"], path_log=pl)
+                raise
+    except Exception as exc:
+        wps.log_install_line(paths["install_dir"], f"INSTALL FAILED: {exc}", verbose=verbose)
+        raise
     print("Install completed.")
     print(f"Launcher: {launch_path}")
     if os_name == "linux" and enable_service:
         print("Service started with: systemctl --user start scrcpy-auto.service")
     elif os_name == "linux":
         print("Service installed but left disabled by user choice.")
+
+    if os_name == "windows":
+        wps.warn_external_tools(paths["install_dir"], verbose=verbose)
 
     if run_tests_and_log:
         print("Running tests and validations now. Please wait...")
@@ -492,9 +517,14 @@ def do_uninstall(
 ) -> None:
     print("Stopping service/task first...")
     stop_service(os_name, paths["service_file"])
+    if os_name == "windows":
+        idir = paths["install_dir"]
+        pl = idir / "config" / "path_changes.log" if idir.exists() else None
+        wps.windows_uninstall_cli_shim(idir, path_log=pl)
     print("Removing service/task from startup...")
     uninstall_service(os_name, paths["service_file"])
-    alias = read_installed_alias(paths["install_dir"])
+    install_dir = paths["install_dir"]
+    alias = read_installed_alias(install_dir) if install_dir.exists() else DEFAULT_ALIAS
     remove_managed_launchers(paths, os_name, alias)
     if remove_app_files and paths["install_dir"].exists():
         shutil.rmtree(paths["install_dir"])
@@ -520,6 +550,19 @@ def do_sync_alias(paths: dict[str, Path], os_name: str, alias: str) -> None:
         old_path.unlink()
     save_alias_to_config(install_dir, alias)
     write_launcher(os_name, new_path, install_dir)
+    if os_name == "windows" and wps.read_marker():
+        mr = wps.read_marker() or {}
+        prev_a = str(mr.get("alias") or "").strip()
+        if prev_a and prev_a != alias:
+            old_cmd = wps.windows_shim_dir() / f"{normalize_alias(prev_a)}.cmd"
+            if old_cmd.is_file():
+                try:
+                    old_cmd.unlink()
+                except OSError:
+                    pass
+        wps.write_cli_shim_cmd(wps.windows_shim_dir() / f"{alias}.cmd", install_dir)
+        mr["alias"] = alias
+        wps.write_marker(mr)
     print(f"Alias synced: {alias}")
 
 
@@ -527,11 +570,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="XYZ-scrcpy multi-OS installer")
     parser.add_argument(
         "--action",
-        choices=["install", "uninstall", "remove", "sync-alias"],
+        choices=["install", "uninstall", "remove", "sync-alias", "diagnose"],
         help="Run without interactive action prompt.",
     )
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt.")
     parser.add_argument("--alias", help="Custom launcher alias/command name.")
+    parser.add_argument("--verbose", action="store_true", help="Verbose logging to console and install.log (Windows).")
     return parser.parse_args()
 
 
@@ -544,6 +588,13 @@ def main() -> int:
 
     src_root = Path(__file__).resolve().parent
     paths = detect_paths(os_name, Path.home())
+
+    if args.action == "diagnose":
+        if os_name != "windows":
+            print("diagnose is only supported on Windows.")
+            return 1
+        inst = paths["install_dir"] if paths["install_dir"].exists() else None
+        return wps.run_diagnose(inst)
 
     action = args.action
     if not action:
@@ -573,7 +624,15 @@ def main() -> int:
                 else:
                     enable_service = ask_yes_no("Enable service", default_yes=True)
                     run_tests_and_log = ask_yes_no("Run tests and view log", default_yes=True)
-                do_install(paths, src_root, os_name, alias, enable_service, run_tests_and_log)
+                do_install(
+                    paths,
+                    src_root,
+                    os_name,
+                    alias,
+                    enable_service,
+                    run_tests_and_log,
+                    verbose=args.verbose,
+                )
             else:
                 do_sync_alias(paths, os_name, alias)
         else:
