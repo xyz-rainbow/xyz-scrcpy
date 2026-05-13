@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,33 @@ def windows_marker_path() -> Path:
 
 def windows_path_backup_path() -> Path:
     return windows_shim_root() / BACKUP_FILENAME
+
+
+def windows_temp_dir() -> Path:
+    """Profile temp directory (TEMP/TMP or system default); do not assume C:\\Temp."""
+    for key in ("TEMP", "TMP"):
+        v = os.environ.get(key)
+        if v:
+            return Path(v)
+    return Path(tempfile.gettempdir())
+
+
+def shim_path_key() -> str:
+    """path_key for the canonical CLI shim directory (for orphan PATH detection)."""
+    return path_key_for_compare(_canonical_segment_for_path(windows_shim_dir()))
+
+
+def count_user_path_shim_segments() -> int:
+    """How many user Path segments match the xyz-scrcpy CLI shim directory (Windows only)."""
+    if not is_windows():
+        return 0
+    val, _ = read_user_path_value()
+    if val is None:
+        return 0
+    k = shim_path_key()
+    if not k:
+        return 0
+    return sum(1 for s in split_path_segments(val) if path_key_for_compare(s) == k)
 
 
 def path_key_for_compare(p: str) -> str:
@@ -113,7 +141,7 @@ def write_user_path_value(path_str: str, reg_type: int) -> None:
 
 
 def broadcast_environment_change() -> None:
-    """Notify running apps that environment changed (best-effort)."""
+    """Notify running apps that environment changed (best-effort, WM_SETTINGCHANGE "Environment")."""
     if not is_windows():
         return
     try:
@@ -396,7 +424,11 @@ def windows_install_cli_shim(
     path_log: Path | None = None,
     backup_path: Path | None = None,
 ) -> None:
-    """Add shim dir to user PATH, write <alias>.cmd, write marker. Caller should backup PATH first."""
+    """Add shim dir to user PATH, write <alias>.cmd, write marker.
+
+    Call only after install_dir contains .venv (shim invokes that python).
+    Backup of HKCU Path is written immediately before the first registry mutation.
+    """
     if not is_windows():
         return
     shim_dir = windows_shim_dir()
@@ -427,15 +459,11 @@ def windows_uninstall_cli_shim(
     if not is_windows():
         return
     marker = read_marker()
-    segment = None
-    if marker and marker.get("path_segment"):
-        segment = str(marker["path_segment"])
-    elif marker and marker.get("shim_dir"):
-        segment = str(marker["shim_dir"])
-    else:
-        segment = _canonical_segment_for_path(windows_shim_dir())
-    if segment:
-        remove_segment_from_user_path(segment, path_log=path_log)
+    if marker:
+        ps = marker.get("path_segment") or marker.get("shim_dir")
+        if ps:
+            remove_segment_from_user_path(str(ps), path_log=path_log)
+    # Removes all segments whose key matches the canonical shim dir (covers orphans and duplicates).
     remove_segment_from_user_path(_canonical_segment_for_path(windows_shim_dir()), path_log=path_log)
     if remove_shim_files:
         sd = windows_shim_root() / "cli"
@@ -456,7 +484,7 @@ def windows_uninstall_cli_shim(
         pass
 
 
-def run_diagnose(install_dir: Path | None) -> int:
+def run_diagnose(install_dir: Path | None, *, clean_user_path: bool = False) -> int:
     """Print diagnostics for Windows PATH/shim/Python."""
     if not is_windows():
         print("diagnose: Windows only.")
@@ -469,6 +497,8 @@ def run_diagnose(install_dir: Path | None) -> int:
     print("shim_root:", windows_shim_root())
     print("shim_dir:", windows_shim_dir(), "exists:", windows_shim_dir().is_dir())
     print("marker:", read_marker())
+    print("user Path segments matching CLI shim key:", count_user_path_shim_segments())
+    print("windows_temp_dir():", windows_temp_dir())
     py, err = resolve_python_for_checks()
     print("python:", py, "error:", err)
     try:
@@ -485,4 +515,8 @@ def run_diagnose(install_dir: Path | None) -> int:
         print("schtasks:", exc)
     if install_dir and install_dir.exists():
         print("install_dir:", install_dir)
+    if clean_user_path:
+        pl = path_changes_log_path(install_dir) if install_dir and install_dir.exists() else None
+        n = remove_segment_from_user_path(_canonical_segment_for_path(windows_shim_dir()), path_log=pl)
+        print(f"clean_user_path: removed {n} matching HKCU Path segment(s).")
     return 0

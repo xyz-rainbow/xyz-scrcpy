@@ -7,6 +7,7 @@ import argparse
 import json
 import logging
 import os
+import traceback
 import platform
 import re
 import shlex
@@ -35,6 +36,21 @@ def run_cmd_quiet(cmd: list[str]) -> subprocess.CompletedProcess:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+def _schtasks_run_logged(
+    cmd: list[str],
+    *,
+    label: str,
+    verbose: bool,
+    install_dir: Path | None,
+) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    if verbose:
+        print(f"[verbose] {label} exit={proc.returncode}")
+    if verbose and install_dir and install_dir.exists():
+        wps.log_install_line(install_dir, f"[schtasks] {label} exit={proc.returncode}", verbose=False)
+    return proc
 
 
 def ask_choice(prompt: str, options: list[str], default: str | None = None) -> str:
@@ -315,17 +331,34 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
     service_file.write_text(TASK_NAME, encoding="utf-8")
 
 
-def stop_service(os_name: str, service_file: Path) -> None:
+def stop_service(
+    os_name: str,
+    service_file: Path,
+    *,
+    verbose: bool = False,
+    install_dir: Path | None = None,
+) -> None:
     if os_name == "linux":
         run_cmd_quiet(["systemctl", "--user", "stop", "scrcpy-auto.service"])
         return
     if os_name == "darwin":
         run_cmd_quiet(["launchctl", "unload", str(service_file)])
         return
-    run_cmd_quiet(["schtasks", "/end", "/tn", TASK_NAME])
+    _schtasks_run_logged(
+        ["schtasks", "/end", "/tn", TASK_NAME],
+        label=f"/end /tn {TASK_NAME}",
+        verbose=verbose,
+        install_dir=install_dir,
+    )
 
 
-def uninstall_service(os_name: str, service_file: Path) -> None:
+def uninstall_service(
+    os_name: str,
+    service_file: Path,
+    *,
+    verbose: bool = False,
+    install_dir: Path | None = None,
+) -> None:
     if os_name == "linux":
         run_cmd_quiet(["systemctl", "--user", "disable", "--now", "scrcpy-auto.service"])
         if service_file.exists():
@@ -337,7 +370,12 @@ def uninstall_service(os_name: str, service_file: Path) -> None:
         if service_file.exists():
             service_file.unlink()
         return
-    run_cmd_quiet(["schtasks", "/delete", "/tn", TASK_NAME, "/f"])
+    _schtasks_run_logged(
+        ["schtasks", "/delete", "/tn", TASK_NAME, "/f"],
+        label=f"/delete /tn {TASK_NAME} /f",
+        verbose=verbose,
+        install_dir=install_dir,
+    )
     if service_file.exists():
         service_file.unlink()
 
@@ -444,7 +482,7 @@ def do_install(
     install_root = paths["install_dir"]
     previous_alias = read_installed_alias(install_root) if install_root.exists() else DEFAULT_ALIAS
     print("Running clean install (removing previous installation first)...")
-    do_uninstall(paths, os_name, remove_app_files=True, remove_repo_copy=False)
+    do_uninstall(paths, os_name, remove_app_files=True, remove_repo_copy=False, verbose=verbose)
     try:
         copy_project(src_root, paths["install_dir"])
         if os_name == "windows":
@@ -466,7 +504,8 @@ def do_install(
                 wps.windows_uninstall_cli_shim(paths["install_dir"], path_log=pl)
                 raise
     except Exception as exc:
-        wps.log_install_line(paths["install_dir"], f"INSTALL FAILED: {exc}", verbose=verbose)
+        detail = f"INSTALL FAILED: {exc}\n{traceback.format_exc()}"
+        wps.log_install_line(paths["install_dir"], detail, verbose=verbose)
         raise
     print("Install completed.")
     print(f"Launcher: {launch_path}")
@@ -514,15 +553,27 @@ def do_uninstall(
     remove_app_files: bool = True,
     remove_repo_copy: bool = False,
     repo_dir: Path | None = None,
+    *,
+    verbose: bool = False,
 ) -> None:
     print("Stopping service/task first...")
-    stop_service(os_name, paths["service_file"])
+    idir = paths["install_dir"]
+    stop_service(
+        os_name,
+        paths["service_file"],
+        verbose=verbose,
+        install_dir=idir if idir.exists() else None,
+    )
     if os_name == "windows":
-        idir = paths["install_dir"]
         pl = idir / "config" / "path_changes.log" if idir.exists() else None
         wps.windows_uninstall_cli_shim(idir, path_log=pl)
     print("Removing service/task from startup...")
-    uninstall_service(os_name, paths["service_file"])
+    uninstall_service(
+        os_name,
+        paths["service_file"],
+        verbose=verbose,
+        install_dir=idir if idir.exists() else None,
+    )
     install_dir = paths["install_dir"]
     alias = read_installed_alias(install_dir) if install_dir.exists() else DEFAULT_ALIAS
     remove_managed_launchers(paths, os_name, alias)
@@ -576,6 +627,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt.")
     parser.add_argument("--alias", help="Custom launcher alias/command name.")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging to console and install.log (Windows).")
+    parser.add_argument(
+        "--clean-user-path",
+        action="store_true",
+        help="With --action diagnose (Windows): remove HKCU Path segment(s) matching the xyz-scrcpy CLI shim directory.",
+    )
     return parser.parse_args()
 
 
@@ -594,7 +650,7 @@ def main() -> int:
             print("diagnose is only supported on Windows.")
             return 1
         inst = paths["install_dir"] if paths["install_dir"].exists() else None
-        return wps.run_diagnose(inst)
+        return wps.run_diagnose(inst, clean_user_path=args.clean_user_path)
 
     action = args.action
     if not action:
@@ -648,6 +704,7 @@ def main() -> int:
                 remove_app_files=remove_files,
                 remove_repo_copy=remove_repo_copy,
                 repo_dir=src_root,
+                verbose=args.verbose,
             )
     except subprocess.CalledProcessError as exc:
         print(f"Command failed: {' '.join(exc.cmd)}")

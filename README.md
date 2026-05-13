@@ -41,7 +41,7 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 
 - **Repo dev launcher**: from a clone with `.venv` and `vendor\` populated, run `.\xyz-scrcpy.cmd` in PowerShell or CMD. It prepends `vendor` to `PATH` and runs `bin\launch_with_checks.py` with `.venv\Scripts\python.exe`. If the venv is missing, create it (e.g. run `install_xyz.py` or `uv venv` plus `pip install -r .requirements.txt`) before using the script.
 - **Installed CLI**: a successful Windows install adds `%LOCALAPPDATA%\xyz-scrcpy\cli` to your **user** `PATH` and drops `<alias>.cmd` there so you can run your chosen alias from any terminal. Uninstall removes that segment and the shim files when possible.
-- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, Python resolution, and a Task Scheduler query for `XYZScrcpyMonitor`. Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install.
+- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, how many `Path` segments match the CLI shim, `TEMP`, Python resolution, and a Task Scheduler query for `XYZScrcpyMonitor`. Add `--clean-user-path` on the same command to strip orphan HKCU `Path` rows that still match the shim directory (then reinstall or run a full uninstall to refresh the marker). Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install; uninstall with `--verbose` logs `schtasks /end` and `/delete` exit codes when the install tree still exists.
 - **Installer EXE**: Inno Setup script at `packaging/windows/setup.iss` (build with Inno Setup 6’s `ISCC.exe`). Unsigned builds may trigger **SmartScreen**; use “More info” → “Run anyway” if you trust the artifact. The wizard requires **Python 3.10+** (`py -3` or `python`) on `PATH` before files are staged.
 - **Python**: avoid the embeddable distribution without `pip`; the installer checks for `import pip` when resolving the runtime.
 
@@ -224,6 +224,14 @@ python -m py_compile install_xyz.py win_path_shim.py repair_xyz.py \
 python -m unittest discover -s tests -p "test_*.py"
 bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
 ```
+
+### Release / Inno (Windows EXE)
+
+- Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then from the repository root run:  
+  `"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\setup.iss`  
+  (adjust the path if your `ISCC.exe` lives elsewhere.) Output falls under `dist/` as configured in the script.
+- Keep `packaging/windows/setup.iss` `#define MyAppVersion` aligned with `pyproject.toml` `[project].version`.
+- **CI**: the default GitHub Actions workflow does **not** compile the `.iss` (Inno is not preinstalled on `windows-latest`). Build the EXE on a release machine or add an optional workflow job if you install Inno on the runner.
 
 ## Repository Layout
 

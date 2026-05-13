@@ -2,6 +2,7 @@
 ; Requires Python 3.10+ (py -3 or python) on PATH.
 
 #define MyAppName "XYZ-scrcpy"
+; Keep in sync with [project] version in pyproject.toml
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Rainbowtechnology"
 #define MyAppURL "https://github.com/xyz-rainbow/xyz-scrcpy"
@@ -25,6 +26,9 @@ WizardStyle=modern
 MinVersion=10.0.17763
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+
+[CustomMessages]
+AppReleaseHint=Build the installer with Inno Setup 6 (ISCC.exe). See README section Release / Inno.
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -56,7 +60,7 @@ begin
     Result := True;
     Exit;
   end;
-  MsgBox('Python 3.10+ not found. Install from https://www.python.org/downloads/ (check "Add to PATH") or install the py launcher, then retry.'#13#10#13#10'Unsigned EXEs may show SmartScreen — use More info / Run anyway if you trust this build.', mbError, MB_OK);
+  MsgBox('Python 3.10+ not found. Install from https://www.python.org/downloads/ (check "Add to PATH") or install the py launcher, then retry.'#13#10#13#10'Unsigned EXEs may show SmartScreen — use More info / Run anyway if you trust this build.'#13#10#13#10'{cm:AppReleaseHint}', mbError, MB_OK);
   Result := False;
 end;
 
