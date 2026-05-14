@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import win_path_shim as wps
+import adb_resolve
 
 
 APP_NAME = "xyz-scrcpy"
@@ -311,10 +312,21 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
     inst = str(install_dir).replace("/", "\\")
     pyw = str(pythonw).replace("/", "\\")
     mon = str(menu_script).replace("/", "\\")
+    sch = shutil.which("schtasks")
+    if not sch:
+        msg = (
+            "[WARN] schtasks.exe not found (e.g. some Server Core / reduced SKUs). "
+            "Skipping Scheduled Task; enable the monitor manually if needed."
+        )
+        print(msg)
+        wps.log_install_line(install_dir, msg, verbose=False)
+        service_file.parent.mkdir(parents=True, exist_ok=True)
+        service_file.write_text(TASK_NAME)
+        return
     task_tr = f'cmd /c cd /d "{inst}" && set "PATH={inst}\\vendor;%PATH%" && "{pyw}" "{mon}"'
     run_cmd(
         [
-            "schtasks",
+            sch,
             "/create",
             "/f",
             "/sc",
@@ -326,7 +338,7 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
         ]
     )
     if not enable_service:
-        run_cmd(["schtasks", "/end", "/tn", TASK_NAME], check=False)
+        run_cmd([sch, "/end", "/tn", TASK_NAME], check=False)
     service_file.parent.mkdir(parents=True, exist_ok=True)
     service_file.write_text(TASK_NAME, encoding="utf-8")
 
@@ -344,8 +356,11 @@ def stop_service(
     if os_name == "darwin":
         run_cmd_quiet(["launchctl", "unload", str(service_file)])
         return
+    sch = shutil.which("schtasks")
+    if not sch:
+        return
     _schtasks_run_logged(
-        ["schtasks", "/end", "/tn", TASK_NAME],
+        [sch, "/end", "/tn", TASK_NAME],
         label=f"/end /tn {TASK_NAME}",
         verbose=verbose,
         install_dir=install_dir,
@@ -370,8 +385,13 @@ def uninstall_service(
         if service_file.exists():
             service_file.unlink()
         return
+    sch = shutil.which("schtasks")
+    if not sch:
+        if service_file.exists():
+            service_file.unlink()
+        return
     _schtasks_run_logged(
-        ["schtasks", "/delete", "/tn", TASK_NAME, "/f"],
+        [sch, "/delete", "/tn", TASK_NAME, "/f"],
         label=f"/delete /tn {TASK_NAME} /f",
         verbose=verbose,
         install_dir=install_dir,
@@ -380,10 +400,16 @@ def uninstall_service(
         service_file.unlink()
 
 
-def check_dependencies(os_name: str, *, verbose: bool = False) -> None:
+def check_dependencies(os_name: str, *, verbose: bool = False, project_root: Path | None = None) -> None:
     required = ["adb", "scrcpy"]
     required.insert(0, "python" if os_name == "windows" else "python3")
-    missing = [dep for dep in required if shutil.which(dep) is None]
+    missing = []
+    for dep in required:
+        if dep == "adb" and project_root is not None:
+            if adb_resolve.resolve_adb_executable(project_root)[1] != "not_found":
+                continue
+        if shutil.which(dep) is None:
+            missing.append(dep)
     if missing:
         msg = f"Warning: Missing dependencies: {', '.join(missing)}"
         print(msg)
@@ -478,7 +504,7 @@ def do_install(
     if verbose:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     print(f"Installing to: {paths['install_dir']}")
-    check_dependencies(os_name, verbose=verbose)
+    check_dependencies(os_name, verbose=verbose, project_root=src_root)
     install_root = paths["install_dir"]
     previous_alias = read_installed_alias(install_root) if install_root.exists() else DEFAULT_ALIAS
     print("Running clean install (removing previous installation first)...")
@@ -605,14 +631,18 @@ def do_sync_alias(paths: dict[str, Path], os_name: str, alias: str) -> None:
         mr = wps.read_marker() or {}
         prev_a = str(mr.get("alias") or "").strip()
         if prev_a and prev_a != alias:
-            old_cmd = wps.windows_shim_dir() / f"{normalize_alias(prev_a)}.cmd"
-            if old_cmd.is_file():
-                try:
-                    old_cmd.unlink()
-                except OSError:
-                    pass
-        wps.write_cli_shim_cmd(wps.windows_shim_dir() / f"{alias}.cmd", install_dir)
+            na = normalize_alias(prev_a)
+            for ext in (".cmd", ".bat"):
+                old_shim = wps.windows_shim_dir() / f"{na}{ext}"
+                if old_shim.is_file():
+                    try:
+                        old_shim.unlink()
+                    except OSError:
+                        pass
+        h, shim_cmd = wps.write_cli_shim_pair(wps.windows_shim_dir(), alias, install_dir)
         mr["alias"] = alias
+        mr["shim_content_hash"] = h
+        mr["shim_cmd"] = str(shim_cmd)
         wps.write_marker(mr)
     print(f"Alias synced: {alias}")
 
@@ -650,7 +680,7 @@ def main() -> int:
             print("diagnose is only supported on Windows.")
             return 1
         inst = paths["install_dir"] if paths["install_dir"].exists() else None
-        return wps.run_diagnose(inst, clean_user_path=args.clean_user_path)
+        return wps.run_diagnose(inst, repo_root=src_root, clean_user_path=args.clean_user_path)
 
     action = args.action
     if not action:

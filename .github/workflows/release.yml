@@ -28,7 +28,7 @@ jobs:
       - name: Syntax check (Python)
         run: >
           python -m py_compile
-          install_xyz.py repair_xyz.py
+          install_xyz.py win_path_shim.py adb_resolve.py repair_xyz.py
           bin/menu.py bin/config_loader.py bin/monitor.py
           bin/check_and_repair.py bin/launch_with_checks.py
 

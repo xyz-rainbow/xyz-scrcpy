@@ -17,6 +17,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 BIN_DIR = SCRIPT_DIR
+
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+import adb_resolve  # noqa: E402
 MENU_SCRIPT = BIN_DIR / "menu.py"
 CFG_LOADER = BIN_DIR / "config_loader.py"
 
@@ -135,8 +139,9 @@ def evaluate_test_pause_state(prev_serials: str, curr_serials: str) -> str:
 
 def read_serials_from_adb() -> str:
     try:
+        adb = adb_resolve.resolve_adb_executable(REPO_DIR)[0]
         out = subprocess.check_output(
-            ["adb", "devices"],
+            [adb, "devices"],
             text=True,
             timeout=30,
             stderr=subprocess.DEVNULL,

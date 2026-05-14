@@ -1,0 +1,13 @@
+# Optional: compile packaging/windows/setup.iss when Inno Setup is present on the runner.
+name: Inno smoke (optional)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compile-iss:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Try ISCC (skip if Inno not installed)
+        run: powershell -NoProfile -File packaging/windows/smoke-iscc.ps1

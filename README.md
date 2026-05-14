@@ -3,9 +3,9 @@
 Interactive Android device launcher and monitor on top of `scrcpy`, built for users who want an auto-start background service plus a configurable terminal UI.
 
 <p align="center">
-  <img src="assets/current_app_2026-04-22-21-47-25.png" alt="Current real-world view of the app" width="360" />
+  <img src="vendor/icon.png" alt="XYZ-scrcpy project icon" width="200" />
 </p>
-<p align="center"><em>Current app appearance (real usage screenshot)</em></p>
+<p align="center"><em>Project icon (bundled under <code>vendor/icon.png</code>)</em></p>
 
 ## Who This Is For
 
@@ -16,7 +16,7 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 ## Requirements
 
 - `python3` **3.10+** (runtime; see `pyproject.toml` / `.requirements.txt` for declared dependencies such as `psutil`).
-- `adb`
+- `adb` (Android platform-tools). On Windows, if `adb` is not on `PATH`, this project prefers `vendor/adb.exe` when present, then optional SDK discovery (see **Android device connectivity** below). You can point to any `platform-tools` directory with `XYZ_ANDROID_PLATFORM_TOOLS`.
 - `scrcpy`
 - `bash` (Linux/macOS: thin `*.sh` stubs that `exec` Python; checks and Windows flows do **not** require Git Bash).
 - Linux desktop with `systemd --user` and any common terminal emulator for full auto-start UX
@@ -40,12 +40,28 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 ### Windows: dev clone launcher and CLI on PATH
 
 - **Repo dev launcher**: from a clone with `.venv` and `vendor\` populated, run `.\xyz-scrcpy.cmd` in PowerShell or CMD. It prepends `vendor` to `PATH` and runs `bin\launch_with_checks.py` with `.venv\Scripts\python.exe`. If the venv is missing, create it (e.g. run `install_xyz.py` or `uv venv` plus `pip install -r .requirements.txt`) before using the script.
-- **Installed CLI**: a successful Windows install adds `%LOCALAPPDATA%\xyz-scrcpy\cli` to your **user** `PATH` and drops `<alias>.cmd` there so you can run your chosen alias from any terminal. Uninstall removes that segment and the shim files when possible.
-- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, how many `Path` segments match the CLI shim, `TEMP`, Python resolution, and a Task Scheduler query for `XYZScrcpyMonitor`. Add `--clean-user-path` on the same command to strip orphan HKCU `Path` rows that still match the shim directory (then reinstall or run a full uninstall to refresh the marker). Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install; uninstall with `--verbose` logs `schtasks /end` and `/delete` exit codes when the install tree still exists.
+- **Installed CLI**: a successful Windows install adds `%LOCALAPPDATA%\xyz-scrcpy\cli` to your **user** `PATH` and drops **`<alias>.cmd` and `<alias>.bat`** there (same payload; some shells / `PATHEXT` resolve `.bat` more predictably than `.cmd`). Uninstall removes that segment and the shim files when possible.
+- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, how many `Path` segments match the CLI shim, `TEMP`, Python resolution, a Task Scheduler query for `XYZScrcpyMonitor`, and an **adb** block: resolved executable (PATH vs `vendor/adb.exe` vs SDK-style locations), `adb version` when runnable, plus `adb devices` (or a short hint when the list is empty). Add `--clean-user-path` on the same command to strip orphan HKCU `Path` rows that still match the shim directory (then reinstall or run a full uninstall to refresh the marker). Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install; uninstall with `--verbose` logs `schtasks /end` and `/delete` exit codes when the install tree still exists.
 - **Installer EXE**: Inno Setup script at `packaging/windows/setup.iss` (build with Inno Setup 6’s `ISCC.exe`). Unsigned builds may trigger **SmartScreen**; use “More info” → “Run anyway” if you trust the artifact. The wizard requires **Python 3.10+** (`py -3` or `python`) on `PATH` before files are staged.
-- **Python**: avoid the embeddable distribution without `pip`; the installer checks for `import pip` when resolving the runtime.
+- **Python**: avoid the embeddable distribution without `pip`; the installer checks for `import pip` when resolving the runtime. When several runtimes exist, resolution prefers **`py -3.10`**, then **`py -3.11` … `py -3.19`**, then **`py -3`**, then **`python`** so a generic `py -3` does not accidentally bind to 3.9 before a pinned 3.10+ is tried.
 
-## Architecture and Flows (SVG)
+#### Windows risks (Defender, Sandbox, Server Core)
+
+- **Microsoft Defender** or other AV may flag unsigned `.cmd` / `.bat` / `python.exe` invocations from `%LOCALAPPDATA%` or from the Inno extract folder under `%LOCALAPPDATA%\Programs\XYZ-scrcpy`. Allow-list the shim directory and your clone path if installs fail silently or “Access denied” appears.
+- **Windows Sandbox** and locked-down VMs may block `schtasks`, ignore `WM_SETTINGCHANGE`, or restrict registry edits to `HKCU\Environment`. Use `install_xyz.py --action diagnose` to see what failed; the installer skips task creation (with a warning) if `schtasks.exe` is missing (e.g. some **Server Core** images).
+
+## Android device connectivity (troubleshooting)
+
+Short checklist when `adb devices` is empty or the phone never leaves `unauthorized` / `offline`:
+
+- **USB debugging**: enable *Developer options* → *USB debugging* on the device; unlock the screen when plugging in; accept the RSA fingerprint prompt.
+- **Xiaomi / MIUI**: some builds also require *USB debugging (Security settings)* (allows ADB through the stricter security layer).
+- **Cable and port**: charge-only cables and flaky USB controllers are common; try another cable, a rear motherboard port, or USB 2.0 instead of a front-panel hub.
+- **Hubs and Windows USB power**: unpowered hubs or aggressive **USB selective suspend** can delay enumeration enough that Windows reports **Device Descriptor Request Failed** even with a good phone. Prefer a direct motherboard port; in **Power Options** → advanced settings, try disabling **USB selective suspend**; in **Device Manager** → *Universal Serial Bus controllers*, uncheck **Allow the computer to turn off this device to save power** on the **USB Root Hub** (and on intermediate hubs if present). Severe USB host faults can mimic the same symptoms—rule out hardware if errors persist on every port.
+- **WSL**: Linux inside WSL does **not** see your PC’s USB devices by default, so `adb devices` there is often empty. Use **ADB on Windows** (host `cmd` / PowerShell, `vendor\adb.exe`, or `XYZ_ANDROID_PLATFORM_TOOLS`). If you intentionally need USB inside WSL, install **[usbipd-win](https://github.com/dorssel/usbipd-win)** on Windows and follow Microsoft’s guide to attach devices to WSL ([Connect USB devices](https://learn.microsoft.com/windows/wsl/connect-usb)); that is **optional** and **not** required for the normal native Windows install path.
+- **Windows / PnP errors**: if Device Manager shows failed “Android” or composite USB descriptors, fix the driver stack (OEM USB driver, Intel/AMD chipset/USB3 drivers) before expecting a stable ADB session.
+- **Custom `platform-tools` location**: set environment variable `XYZ_ANDROID_PLATFORM_TOOLS` to the **directory** that contains `adb.exe` (for example a folder literally named `platform-tools`, even when the full path contains spaces or brackets).
+- **spacedesk** is a separate product (often used for a second-screen or USB tethering style link). It does **not** replace ADB for this launcher. If spacedesk is running, it is unrelated to whether `adb devices` lists the phone; still use proper USB debugging and drivers for `adb`/`scrcpy`.
 
 ![Architecture diagram](docs/assets/architecture.svg)
 *Main components and interactions.*
@@ -218,7 +234,7 @@ Same checks as [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (Linux run
 
 ```bash
 pip install -r .requirements.txt
-python -m py_compile install_xyz.py win_path_shim.py repair_xyz.py \
+python -m py_compile install_xyz.py win_path_shim.py adb_resolve.py repair_xyz.py \
   bin/menu.py bin/config_loader.py bin/monitor.py \
   bin/check_and_repair.py bin/launch_with_checks.py
 python -m unittest discover -s tests -p "test_*.py"
@@ -230,17 +246,23 @@ bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
 - Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then from the repository root run:  
   `"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\setup.iss`  
   (adjust the path if your `ISCC.exe` lives elsewhere.) Output falls under `dist/` as configured in the script.
+- **Icon**: the installer script expects [`packaging/windows/app.ico`](packaging/windows/app.ico) next to `setup.iss` (wizard icon, uninstall entry, optional desktop shortcut). Regenerate from `vendor/icon.png` if you change branding, for example:  
+  `pip install pillow` then  
+  `python -c "from PIL import Image; Image.open('vendor/icon.png').convert('RGBA').save('packaging/windows/app.ico', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"`.
+- **Payload size / hygiene**: `setup.iss` lists `[Files]` `Excludes` with **comma** separators (Inno’s documented format). A mis-separated list can accidentally ship `.git`, `.venv`, `.pytest_cache`, and local logs—rebuild after fixing the script. For the smallest artifact, compile from a clean export or ensure those paths are absent.
+- **Installer UX** (Inno script): per-user extract under `%LOCALAPPDATA%\Programs\XYZ-scrcpy`, wizard `SetupIconFile`, optional **desktop** `.lnk` (with icon) created **after** `install_xyz.py` via [`packaging/windows/create-desktop-shortcut.ps1`](packaging/windows/create-desktop-shortcut.ps1) (Inno installs `[Icons]` before `[Run]`, so do not point Inno shortcuts at the Start Menu `.cmd` until that file exists), and a **finish-page** “Launch” checkbox that starts the Start Menu `.cmd` (default alias `xyz-scrcpy`; keep `#define MyAppAlias` in `setup.iss` aligned with `install_xyz.DEFAULT_ALIAS` if you change it).
 - Keep `packaging/windows/setup.iss` `#define MyAppVersion` aligned with `pyproject.toml` `[project].version`.
-- **CI**: the default GitHub Actions workflow does **not** compile the `.iss` (Inno is not preinstalled on `windows-latest`). Build the EXE on a release machine or add an optional workflow job if you install Inno on the runner.
+- **CI**: the default GitHub Actions workflow does **not** compile the `.iss` (Inno is not preinstalled on `windows-latest`). Build the EXE on a release machine, use the smoke script locally, or add a self-hosted / Inno-equipped job. Optional workflow [`.github/workflows/inno-smoke.yml`](.github/workflows/inno-smoke.yml) (`workflow_dispatch`) runs the smoke script on GitHub’s Windows runner (skips compile when Inno is absent).
 
 ## Repository Layout
 
 - `pyproject.toml` / `.requirements.txt` — declared Python dependency versions (`psutil`).
 - `CHANGELOG.md` — published version history.
 - `install_xyz.py` — multi-OS installer and uninstaller.
+- `adb_resolve.py` — resolve `adb` / `adb.exe` (PATH, `vendor/`, `XYZ_ANDROID_PLATFORM_TOOLS`, standard SDK env paths); used by `bin/menu.py`, `bin/monitor.py`, installer diagnostics.
 - `win_path_shim.py` — Windows user `PATH` shim, `%LOCALAPPDATA%\xyz-scrcpy\cli` `.cmd` launcher, backup/marker helpers.
 - `xyz-scrcpy.cmd` — Windows **development** entry from repo root (requires local `.venv`).
-- `packaging/windows/setup.iss` — Inno Setup 6 definition for a low-privilege staging installer that runs `install_xyz.py` / uninstall.
+- `packaging/windows/setup.iss` — Inno Setup 6: per-user extract dir, `install_xyz.py` install/uninstall, optional desktop `.lnk` via `create-desktop-shortcut.ps1` (after `[Run]`), guarded `[UninstallRun]`, finish-page launch.
 - `bin/menu.py` — interactive terminal UI.
 - `bin/monitor.py` — background monitor loop (shared implementation).
 - `bin/monitor.sh` — thin stub that invokes `monitor.py` (keeps systemd `ExecStart` stable).
@@ -260,7 +282,7 @@ bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh
 | Feature | Main file/script | Notes |
 |---|---|---|
 | Interactive menu rendering and navigation | `bin/menu.py` | Dynamic width, centered layout, key handling |
-| Device discovery and labels | `bin/menu.py` | Uses `adb devices` + model lookup |
+| Device discovery and labels | `bin/menu.py` | Uses `adb devices` + model lookup (`adb_resolve.py` picks adb on Windows when PATH is missing) |
 | Device launch with audio target | `bin/menu.py` | Starts `scrcpy` with `--no-audio` when target is `DEVICE` |
 | Microphone forwarding capability check | `bin/menu.py` | Adds mic flag only when detected as supported by current `scrcpy` |
 | scrcpy binary resolution | `bin/menu.py` | Uses `vendor/scrcpy` when executable, else falls back to `scrcpy` from `PATH` |

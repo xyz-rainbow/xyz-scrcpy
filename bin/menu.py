@@ -45,6 +45,10 @@ NEON_PINK = "\033[38;5;213m"
 
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+import adb_resolve  # noqa: E402
+
 import tempfile
 LOCK_PATH = os.path.join(tempfile.gettempdir(), "xyz_menu.lock")
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
@@ -54,6 +58,10 @@ MIC_BUS_NAME = "xyz-mic-input"
 BANNER_COLORS = {"ERROR": RED, "WARN": ORANGE, "OK": GREEN}
 INSTALLABLE_EXTENSIONS = {".apk"}
 ESCAPE_READ_TIMEOUT = 0.03
+
+
+def _adb_exe() -> str:
+    return adb_resolve.resolve_adb_executable(ROOT_DIR)[0]
 
 
 def get_key():
@@ -305,7 +313,7 @@ def pick_path_with_gui(ask_directory=False):
 
 
 def adb_list_packages(serial):
-    ok, out, err, _ = run_command(["adb", "-s", serial, "shell", "pm", "list", "packages"])
+    ok, out, err, _ = run_command([_adb_exe(), "-s", serial, "shell", "pm", "list", "packages"])
     if not ok:
         return None, err or "Unable to list packages."
     packages = []
@@ -319,22 +327,22 @@ def adb_list_packages(serial):
 
 
 def adb_install_apk(serial, apk_path):
-    return run_command(["adb", "-s", serial, "install", "-r", str(apk_path)])
+    return run_command([_adb_exe(), "-s", serial, "install", "-r", str(apk_path)])
 
 
 def adb_uninstall_package(serial, package_name):
-    return run_command(["adb", "-s", serial, "uninstall", package_name])
+    return run_command([_adb_exe(), "-s", serial, "uninstall", package_name])
 
 
 def adb_disconnect(serial):
-    ok, out, err, code = run_command(["adb", "-s", serial, "disconnect"])
+    ok, out, err, code = run_command([_adb_exe(), "-s", serial, "disconnect"])
     if ok:
         return True, out, err, code
-    return run_command(["adb", "disconnect", serial])
+    return run_command([_adb_exe(), "disconnect", serial])
 
 
 def adb_export_apk_to_dir(serial, package_name, destination_dir):
-    ok, out, err, _ = run_command(["adb", "-s", serial, "shell", "pm", "path", package_name])
+    ok, out, err, _ = run_command([_adb_exe(), "-s", serial, "shell", "pm", "path", package_name])
     if not ok:
         return False, [], err or "Unable to get APK paths."
     remote_paths = parse_pm_path_output(out)
@@ -346,7 +354,7 @@ def adb_export_apk_to_dir(serial, package_name, destination_dir):
     for index, remote in enumerate(remote_paths, start=1):
         suffix = f"-{index}" if len(remote_paths) > 1 else ""
         target = destination_dir / f"{package_name}{suffix}.apk"
-        pull_ok, _out, pull_err, _ = run_command(["adb", "-s", serial, "pull", remote, str(target)])
+        pull_ok, _out, pull_err, _ = run_command([_adb_exe(), "-s", serial, "pull", remote, str(target)])
         if not pull_ok:
             return False, exported, pull_err or f"Failed pulling {remote}"
         exported.append(str(target))
@@ -358,7 +366,7 @@ def adb_try_backup(serial, package_name, destination_dir):
     backup_file = destination_dir / f"{package_name}.ab"
     return run_command(
         [
-            "adb",
+            _adb_exe(),
             "-s",
             serial,
             "backup",
@@ -414,12 +422,13 @@ def normalize_audio_preferences(cfg):
 
 def list_devices():
     try:
-        raw = subprocess.check_output(["adb", "devices"], text=True).splitlines()
+        adb = _adb_exe()
+        raw = subprocess.check_output([adb, "devices"], text=True).splitlines()
         serials = [line.split()[0] for line in raw if line.strip().endswith("device") and not line.startswith("List")]
         devices = []
         for serial in serials:
             model = subprocess.check_output(
-                ["adb", "-s", serial, "shell", "getprop", "ro.product.model"],
+                [adb, "-s", serial, "shell", "getprop", "ro.product.model"],
                 text=True,
             ).strip()
             devices.append({"serial": serial, "label": f"{model} ({serial})"})

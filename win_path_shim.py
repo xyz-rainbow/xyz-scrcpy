@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -12,6 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+import adb_resolve
 
 APP_NAME = "xyz-scrcpy"
 TASK_SCHED_NAME = "XYZScrcpyMonitor"
@@ -245,8 +248,8 @@ def remove_segment_from_user_path(segment: str, path_log: Path | None = None) ->
     return removed
 
 
-def write_cli_shim_cmd(cmd_path: Path, install_dir: Path) -> None:
-    """Write UTF-8 without BOM, ASCII-only content, CRLF; quoted paths for spaces."""
+def build_cli_shim_bytes(install_dir: Path) -> bytes:
+    """UTF-8 without BOM, CRLF, ASCII-only; quoted paths for spaces in install_dir."""
     win_inst = str(install_dir.resolve()).replace("/", "\\")
     vpy = str((install_dir / ".venv" / "Scripts" / "python.exe").resolve()).replace("/", "\\")
     lpy = str((install_dir / "bin" / "launch_with_checks.py").resolve()).replace("/", "\\")
@@ -256,9 +259,41 @@ def write_cli_shim_cmd(cmd_path: Path, install_dir: Path) -> None:
         f'"{vpy}" "{lpy}"',
         "",
     ]
-    content = "\r\n".join(lines)
+    return "\r\n".join(lines).encode("utf-8")
+
+
+def write_cli_shim_cmd(cmd_path: Path, install_dir: Path) -> None:
+    """Write a single .cmd shim (see write_cli_shim_pair for .cmd + .bat)."""
     cmd_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd_path.write_bytes(content.encode("utf-8"))
+    cmd_path.write_bytes(build_cli_shim_bytes(install_dir))
+
+
+def write_cli_shim_pair(shim_dir: Path, alias: str, install_dir: Path) -> tuple[str, Path]:
+    """Write <alias>.cmd and <alias>.bat with identical payload (PATHEXT / some shells prefer .bat).
+
+    Returns (shim_content_hash with 'sha256:' prefix, path to primary .cmd for marker).
+    """
+    payload = build_cli_shim_bytes(install_dir)
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    for ext in (".cmd", ".bat"):
+        (shim_dir / f"{alias}{ext}").write_bytes(payload)
+    return digest, (shim_dir / f"{alias}.cmd").resolve()
+
+
+def shim_hash_matches_disk(marker: dict[str, Any] | None) -> tuple[bool | None, str]:
+    """Compare marker shim_content_hash to on-disk .cmd bytes. (None, reason) if cannot decide."""
+    if not marker or not marker.get("shim_content_hash"):
+        return None, "no marker hash"
+    alias = str(marker.get("alias") or "").strip()
+    if not alias:
+        return None, "no alias in marker"
+    p = windows_shim_dir() / f"{alias}.cmd"
+    if not p.is_file():
+        return None, "shim .cmd missing"
+    got = "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+    exp = str(marker["shim_content_hash"])
+    return got == exp, f"expected={exp} actual={got}"
 
 
 def read_marker() -> dict[str, Any] | None:
@@ -334,15 +369,21 @@ def log_install_line(install_dir: Path, msg: str, verbose: bool = False) -> None
 
 
 def resolve_python_for_checks(min_version: tuple[int, int] = (3, 10)) -> tuple[str | None, str | None]:
-    """Return (executable_path, error_message)."""
-    candidates: list[list[str]] = [
-        ["py", "-3", "-c", "import sys; print(sys.executable)"],
-        ["python", "-c", "import sys; print(sys.executable)"],
-    ]
+    """Return (executable_path, error_message).
+
+    Resolution order: ``py -3.10`` (pinned), ``py -3.11`` … ``py -3.19``, ``py -3``, ``python``,
+    so multiple Python versions favor an explicit 3.10+ tag before the generic ``py -3`` selector.
+    """
+    print_exe = ["-c", "import sys; print(sys.executable)"]
+    candidates: list[list[str]] = []
+    if shutil.which("py"):
+        candidates.append(["py", "-3.10", *print_exe])
+        for minor in range(11, 20):
+            candidates.append(["py", f"-3.{minor}", *print_exe])
+        candidates.append(["py", "-3", *print_exe])
+    if shutil.which("python"):
+        candidates.append(["python", *print_exe])
     for argv in candidates:
-        exe = argv[0]
-        if shutil.which(exe) is None:
-            continue
         try:
             proc = subprocess.run(
                 argv,
@@ -371,7 +412,7 @@ def resolve_python_for_checks(min_version: tuple[int, int] = (3, 10)) -> tuple[s
                 continue
             major, minor = int(m.group(1)), int(m.group(2))
             if (major, minor) < min_version:
-                return None, f"Python {py_path} is {major}.{minor}; need >={min_version[0]}.{min_version[1]}."
+                continue
             chk = subprocess.run(
                 [py_path, "-c", "import pip"],
                 capture_output=True,
@@ -387,23 +428,35 @@ def resolve_python_for_checks(min_version: tuple[int, int] = (3, 10)) -> tuple[s
             return py_path, None
         except (subprocess.TimeoutExpired, OSError):
             continue
-    return None, "No suitable Python 3.10+ found (try `py -3` or add `python` to PATH)."
+    return None, "No suitable Python 3.10+ found (try `py -3.10`, `py -3`, or add `python` to PATH)."
 
 
 def warn_external_tools(install_dir: Path, verbose: bool = False) -> None:
     """Non-blocking hints for adb/scrcpy."""
     vendor = install_dir / "vendor"
-    has_vendor_adb = (vendor / "adb.exe").is_file()
     has_vendor_scrcpy = (vendor / "scrcpy.exe").is_file() or (vendor / "scrcpy").is_file()
-    if shutil.which("adb") is None and not has_vendor_adb:
-        msg = "[WARN] adb not found in PATH and not under vendor/. Install Android SDK platform-tools or run setup_vendor."
+    adb_path, adb_src = adb_resolve.resolve_adb_executable(install_dir)
+    if shutil.which("adb") is None and adb_src == "not_found":
+        msg = (
+            "[WARN] adb not found in PATH and not under vendor/ or standard SDK locations. "
+            "Install Android SDK platform-tools, run setup_vendor, or set XYZ_ANDROID_PLATFORM_TOOLS."
+        )
         print(msg)
         log_install_line(install_dir, msg, verbose=verbose)
     if shutil.which("scrcpy") is None and not has_vendor_scrcpy:
         msg = "[WARN] scrcpy not found in PATH and not under vendor/. Install scrcpy or run setup_vendor."
         print(msg)
         log_install_line(install_dir, msg, verbose=verbose)
-    for tool, argv in (("adb", ["adb", "version"]), ("scrcpy", ["scrcpy", "--version"])):
+    if adb_src != "not_found":
+        try:
+            proc = subprocess.run([adb_path, "version"], text=True, capture_output=True, check=False, timeout=15)
+            if proc.returncode == 0 and verbose:
+                first = (proc.stdout or proc.stderr or "").splitlines()[:1]
+                if first:
+                    log_install_line(install_dir, f"[INFO] adb: {first[0]}", verbose=verbose)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    for tool, argv in (("scrcpy", ["scrcpy", "--version"]),):
         exe = shutil.which(tool)
         if not exe:
             continue
@@ -437,14 +490,17 @@ def windows_install_cli_shim(
         backup_path = windows_path_backup_path()
     backup_user_path_to_file(backup_path)
     seg = add_shim_dir_to_user_path(shim_dir, path_log=path_log)
-    cmd_path = shim_dir / f"{alias}.cmd"
-    write_cli_shim_cmd(cmd_path, install_dir)
+    shim_hash, shim_cmd = write_cli_shim_pair(shim_dir, alias, install_dir)
+    inno = (os.environ.get("XYZ_INNO_INSTALL") or "").strip().lower() in ("1", "true", "yes")
+    marker_install_type = "inno" if inno else "python"
     write_marker(
         {
             "shim_dir": seg,
             "alias": alias,
-            "install_type": "installer",
+            "install_type": marker_install_type,
             "path_segment": seg,
+            "shim_cmd": str(shim_cmd),
+            "shim_content_hash": shim_hash,
         }
     )
 
@@ -455,7 +511,7 @@ def windows_uninstall_cli_shim(
     path_log: Path | None = None,
     remove_shim_files: bool = True,
 ) -> None:
-    """Remove PATH segment, marker, shim .cmd; best-effort if partial state."""
+    """Remove PATH segment, marker, shim .cmd/.bat; best-effort if partial state."""
     if not is_windows():
         return
     marker = read_marker()
@@ -471,11 +527,12 @@ def windows_uninstall_cli_shim(
             try:
                 shutil.rmtree(sd)
             except OSError:
-                for child in sd.glob("*.cmd"):
-                    try:
-                        child.unlink()
-                    except OSError:
-                        pass
+                for pat in ("*.cmd", "*.bat"):
+                    for child in sd.glob(pat):
+                        try:
+                            child.unlink()
+                        except OSError:
+                            pass
     delete_marker()
     bp = windows_path_backup_path()
     try:
@@ -484,7 +541,12 @@ def windows_uninstall_cli_shim(
         pass
 
 
-def run_diagnose(install_dir: Path | None, *, clean_user_path: bool = False) -> int:
+def run_diagnose(
+    install_dir: Path | None,
+    *,
+    repo_root: Path | None = None,
+    clean_user_path: bool = False,
+) -> int:
     """Print diagnostics for Windows PATH/shim/Python."""
     if not is_windows():
         print("diagnose: Windows only.")
@@ -497,24 +559,32 @@ def run_diagnose(install_dir: Path | None, *, clean_user_path: bool = False) -> 
     print("shim_root:", windows_shim_root())
     print("shim_dir:", windows_shim_dir(), "exists:", windows_shim_dir().is_dir())
     print("marker:", read_marker())
+    match, hash_detail = shim_hash_matches_disk(read_marker())
+    print("shim_content_hash_match:", match, hash_detail if match is not None else "")
     print("user Path segments matching CLI shim key:", count_user_path_shim_segments())
     print("windows_temp_dir():", windows_temp_dir())
     py, err = resolve_python_for_checks()
     print("python:", py, "error:", err)
-    try:
-        proc = subprocess.run(
-            ["schtasks", "/query", "/tn", TASK_SCHED_NAME],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        print("schtasks query:", proc.returncode)
-        if proc.stdout:
-            print(proc.stdout[:800])
-    except OSError as exc:
-        print("schtasks:", exc)
+    st = shutil.which("schtasks")
+    print("schtasks:", st or "(not found on PATH — Server Core / reduced images may omit Task Scheduler CLI)")
+    if st:
+        try:
+            proc = subprocess.run(
+                [st, "/query", "/tn", TASK_SCHED_NAME],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            print("schtasks query:", proc.returncode)
+            if proc.stdout:
+                print(proc.stdout[:800])
+        except OSError as exc:
+            print("schtasks run error:", exc)
     if install_dir and install_dir.exists():
         print("install_dir:", install_dir)
+    adb_root = install_dir if install_dir and install_dir.exists() else repo_root
+    if adb_root and adb_root.exists():
+        adb_resolve.print_adb_section(adb_root)
     if clean_user_path:
         pl = path_changes_log_path(install_dir) if install_dir and install_dir.exists() else None
         n = remove_segment_from_user_path(_canonical_segment_for_path(windows_shim_dir()), path_log=pl)

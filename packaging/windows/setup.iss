@@ -2,10 +2,12 @@
 ; Requires Python 3.10+ (py -3 or python) on PATH.
 
 #define MyAppName "XYZ-scrcpy"
+#define MyAppAlias "xyz-scrcpy"
 ; Keep in sync with [project] version in pyproject.toml
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Rainbowtechnology"
 #define MyAppURL "https://github.com/xyz-rainbow/xyz-scrcpy"
+#define MyAppIcon "app.ico"
 
 [Setup]
 AppId={{A7B2E9F1-4C3D-5E6F-7890-ABCD12345678}
@@ -15,11 +17,13 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={localappdata}\Programs\xyz-scrcpy-setup-staging
+DefaultDirName={localappdata}\Programs\XYZ-scrcpy
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\..\dist
 OutputBaseFilename=xyz-scrcpy-setup
+SetupIconFile={#MyAppIcon}
+UninstallDisplayIcon={app}\{#MyAppIcon}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -33,17 +37,34 @@ AppReleaseHint=Build the installer with Inno Setup 6 (ISCC.exe). See README sect
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
 [Files]
+Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Excludes: comma-separated (not semicolons — see Inno [Files] Excludes). Patterns exclude dev/CI trees from the shipped payload.
 Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; \
-  Excludes: "\.git\*;\.venv\*;dist\*;__pycache__\*;*.pyc;\.cursor\*;agent-transcripts\*"
+  Excludes: "\.git\*,\.venv\*,\dist\*,__pycache__\*,*.pyc,\.cursor\*,\.pytest_cache\*,\agent-transcripts\*,\.github\*,packaging\windows\app.ico,config\*.log"
+
+; Do not use [Icons] targeting the Start Menu .cmd here: Inno processes [Icons] before non-postinstall [Run],
+; but install_xyz.py creates that .cmd in the first [Run]. Optional desktop .lnk is created in step 2 below.
 
 [Run]
-Filename: "{cmd}"; Parameters: "/c py -3 ""{app}\install_xyz.py"" --action install --yes"; \
-  WorkingDir: "{app}"; Flags: waituntilterminated; StatusMsg: "Running Python installer..."
+Filename: "{cmd}"; Parameters: "/c set XYZ_INNO_INSTALL=1&& py -3 ""{app}\install_xyz.py"" --action install --yes"; \
+  WorkingDir: "{app}"; Flags: waituntilterminated; StatusMsg: "Running Python installer (venv, CLI, Task)..."
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\packaging\windows\create-desktop-shortcut.ps1"" -AppName ""{#MyAppName}"" -Alias ""{#MyAppAlias}"" -IconPath ""{app}\{#MyAppIcon}"""; \
+  WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: desktopicon; StatusMsg: "Creating desktop shortcut..."
+Filename: "{userprograms}\{#MyAppAlias}.cmd"; Description: "{cm:LaunchProgram,{#MyAppName}}"; \
+  Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+Type: files; Name: "{userdesktop}\{#MyAppName}.lnk"
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/c py -3 ""{app}\install_xyz.py"" --action uninstall --yes"; \
-  WorkingDir: "{app}"; Flags: waituntilterminated runifexists; RunOnceId: "XyzUninstallPy"
+; runifexists is not valid for [UninstallRun] in Inno 6; guard with cmd if exist.
+Filename: "{cmd}"; Parameters: "/c if exist ""{app}\install_xyz.py"" (set XYZ_INNO_INSTALL=1&& py -3 ""{app}\install_xyz.py"" --action uninstall --yes)"; \
+  WorkingDir: "{app}"; Flags: waituntilterminated; RunOnceId: "XyzUninstallPy"
 
 [Code]
 function CheckPython310: Boolean;
@@ -71,4 +92,4 @@ end;
 
 [Messages]
 WelcomeLabel1=Welcome to the [name] Setup Wizard
-WelcomeLabel2=This extracts the app to a staging folder, then runs install_xyz.py (profile copy, CLI PATH shim, scheduled task). Uninstall runs install_xyz.py uninstall before removing staging files.
+WelcomeLabel2=This copies the application files below, then runs install_xyz.py (Python venv under your profile, CLI PATH shim, scheduled task).#13#10#13#10The uninstaller runs install_xyz.py uninstall first, then removes the files under this folder.
