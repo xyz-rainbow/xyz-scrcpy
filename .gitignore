@@ -9,6 +9,15 @@ dist/
 build/
 *.egg-info/
 
+# Test / coverage caches
+.pytest_cache/
+**/.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
 # Local runtime logs
 config/check.log
 config/config.json
@@ -17,3 +26,7 @@ config/config.json
 # OS/editor artifacts
 .DS_Store
 Thumbs.db
+
+# Cursor / local agent (never ship in releases)
+.cursor/
+agent-transcripts/

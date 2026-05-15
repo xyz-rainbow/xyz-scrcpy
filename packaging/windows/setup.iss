@@ -44,7 +44,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Excludes: comma-separated (not semicolons — see Inno [Files] Excludes). Patterns exclude dev/CI trees from the shipped payload.
 Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; \
-  Excludes: "\.git\*,\.venv\*,\dist\*,__pycache__\*,*.pyc,\.cursor\*,\.pytest_cache\*,\agent-transcripts\*,\.github\*,packaging\windows\app.ico,config\*.log"
+  Excludes: "\.git\*,\.venv\*,\dist\*,__pycache__\*,*.pyc,\.cursor\*,\.pytest_cache\*,\agent-transcripts\*,\.github\*,\scripts\*,packaging\windows\app.ico,config\*.log"
 
 ; Do not use [Icons] targeting the Start Menu .cmd here: Inno processes [Icons] before non-postinstall [Run],
 ; but install_xyz.py creates that .cmd in the first [Run]. Optional desktop .lnk is created in step 2 below.

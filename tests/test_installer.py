@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,7 +50,8 @@ class InstallerTests(unittest.TestCase):
             install_xyz.write_launcher("linux", old_launcher, install_dir)
             self.assertTrue(old_launcher.exists())
 
-            install_xyz.do_sync_alias(paths, "linux", "new-alias")
+            with redirect_stdout(StringIO()):
+                install_xyz.do_sync_alias(paths, "linux", "new-alias")
             new_launcher = install_xyz.launcher_path("linux", launcher_dir, "new-alias")
             self.assertTrue(new_launcher.exists())
             self.assertFalse(old_launcher.exists())
@@ -78,7 +81,8 @@ class InstallerTests(unittest.TestCase):
                 patch("install_xyz.ensure_windows_runtime_venv"),
                 patch("install_xyz.ensure_linux_psutil"),
             ):
-                install_xyz.do_install(paths, src, "linux", "xyz-scrcpy", True, False)
+                with redirect_stdout(StringIO()):
+                    install_xyz.do_install(paths, src, "linux", "xyz-scrcpy", True, False)
                 mock_uninstall.assert_called_once()
                 mock_copy.assert_called_once()
 
@@ -119,7 +123,8 @@ class InstallerTests(unittest.TestCase):
             }
 
             with patch("install_xyz.stop_service"), patch("install_xyz.uninstall_service"):
-                install_xyz.do_uninstall(paths, "linux")
+                with redirect_stdout(StringIO()):
+                    install_xyz.do_uninstall(paths, "linux")
 
             self.assertFalse(install_dir.exists())
             self.assertFalse(managed_primary.exists())

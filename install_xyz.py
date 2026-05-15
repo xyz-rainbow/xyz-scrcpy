@@ -536,9 +536,9 @@ def do_install(
     print("Install completed.")
     print(f"Launcher: {launch_path}")
     if os_name == "linux" and enable_service:
-        print("Service started with: systemctl --user start scrcpy-auto.service")
+        print("Linux: user unit installed/enabled — start or check with: systemctl --user start scrcpy-auto.service")
     elif os_name == "linux":
-        print("Service installed but left disabled by user choice.")
+        print("Linux: user unit installed but left disabled (your choice at install time).")
 
     if os_name == "windows":
         wps.warn_external_tools(paths["install_dir"], verbose=verbose)
@@ -662,7 +662,25 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="With --action diagnose (Windows): remove HKCU Path segment(s) matching the xyz-scrcpy CLI shim directory.",
     )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Interactive full-screen installer (same TUI style as bin/menu.py).",
+    )
     return parser.parse_args()
+
+
+def _run_install_tui(verbose: bool) -> int:
+    import importlib.util
+
+    path = Path(__file__).resolve().parent / "bin" / "install_tui.py"
+    spec = importlib.util.spec_from_file_location("xyz_install_tui", path)
+    if spec is None or spec.loader is None:
+        print("Could not load install_tui module.")
+        return 1
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return int(mod.main(verbose=verbose))
 
 
 def main() -> int:
@@ -671,6 +689,9 @@ def main() -> int:
     if os_name not in {"linux", "darwin", "windows"}:
         print(f"Unsupported OS: {os_name}")
         return 1
+
+    if args.tui:
+        return _run_install_tui(verbose=args.verbose)
 
     src_root = Path(__file__).resolve().parent
     paths = detect_paths(os_name, Path.home())
