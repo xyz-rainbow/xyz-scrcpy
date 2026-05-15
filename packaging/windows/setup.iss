@@ -4,7 +4,7 @@
 #define MyAppName "XYZ-scrcpy"
 #define MyAppAlias "xyz-scrcpy"
 ; Keep in sync with [project] version in pyproject.toml
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Rainbowtechnology"
 #define MyAppURL "https://github.com/xyz-rainbow/xyz-scrcpy"
 #define MyAppIcon "app.ico"

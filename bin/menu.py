@@ -121,7 +121,8 @@ def trunc_text(text, max_len):
 
 
 def terminal_width():
-    return max(40, min(120, shutil.get_terminal_size(fallback=(80, 24)).columns - 2))
+    # Extra margin: integrated terminals may reserve a column; keeps borders inside visible width.
+    return max(40, min(120, shutil.get_terminal_size(fallback=(80, 24)).columns - 3))
 
 
 def normalize_alias(alias):

@@ -324,19 +324,29 @@ def install_service(os_name: str, service_file: Path, install_dir: Path, enable_
         service_file.write_text(TASK_NAME)
         return
     task_tr = f'cmd /c cd /d "{inst}" && set "PATH={inst}\\vendor;%PATH%" && "{pyw}" "{mon}"'
-    run_cmd(
-        [
-            sch,
-            "/create",
-            "/f",
-            "/sc",
-            "onlogon",
-            "/tn",
-            TASK_NAME,
-            "/tr",
-            task_tr,
-        ]
-    )
+    try:
+        run_cmd(
+            [
+                sch,
+                "/create",
+                "/f",
+                "/sc",
+                "onlogon",
+                "/tn",
+                TASK_NAME,
+                "/tr",
+                task_tr,
+            ]
+        )
+    except subprocess.CalledProcessError as exc:
+        msg = (
+            f"[WARN] schtasks /create failed (exit {exc.returncode}). "
+            "Often policy or elevation. Skipping scheduled task; "
+            "install will still configure the CLI shim and user PATH. "
+            "Create the task manually if you need logon auto-start."
+        )
+        print(msg)
+        wps.log_install_line(install_dir, msg, verbose=False)
     if not enable_service:
         run_cmd([sch, "/end", "/tn", TASK_NAME], check=False)
     service_file.parent.mkdir(parents=True, exist_ok=True)

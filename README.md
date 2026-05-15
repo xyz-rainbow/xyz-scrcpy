@@ -34,24 +34,29 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 
 | OS | Install command | Service / auto-start | Python deps |
 |----|------------------|----------------------|-------------|
-| Linux | `python3 install_xyz.py` | `systemctl --user` user unit → `bin/monitor.sh` → `bin/monitor.py` | `pip install --user` / venv for `psutil` per installer |
-| Windows | `python install_xyz.py` or **`installer.bat`** (interactive CMD menu: uv, `.venv`, colors, then install/uninstall/diagnose/sync-alias; not full-screen TUI) | Task Scheduler `XYZScrcpyMonitor` → `bin/monitor.py` | `.venv` in install dir via **`uv`** |
+| Linux | `python3 install_xyz.py` or **`./installer.sh`** (bash menu: `uv`, `.venv`, `[Y/n]`, `install_xyz.py` actions; [4] diagnose is Windows-only in Python) | `systemctl --user` user unit → `bin/monitor.sh` → `bin/monitor.py` | `pip install --user` / venv for `psutil` per installer |
+| Windows | `python install_xyz.py` or **`installer.bat`** (CMD menu: uv, `.venv`, auto-VT colors, install/uninstall/diagnose/sync-alias) | Task Scheduler `XYZScrcpyMonitor` → `bin/monitor.py` | `.venv` in install dir via **`uv`** |
 
 ### Windows: dev clone launcher and CLI on PATH
 
 - **Repo dev launcher**: from a clone with `.venv` and `vendor\` populated, run `.\xyz-scrcpy.cmd` in PowerShell or CMD. It prepends `vendor` to `PATH` and runs `bin\launch_with_checks.py` with `.venv\Scripts\python.exe`. If the venv is missing, create it (e.g. run `install_xyz.py` or `uv venv` plus `pip install -r .requirements.txt`) before using the script.
-- **`installer.bat`** (repo root, CMD): interactive **menu** (not full-screen TUI). It asks **Y/N** before: installing **`uv`** (official Astral `install.ps1` if missing; declining exits **0**, a failed install after **Y** exits **1**), creating **`.venv`** and dependencies, enabling **ANSI colors** for the session (via `scripts/enable_conhost_vt.ps1`; no registry change), updating the dev environment (**[1]**), and each run of **`install_xyz.py`** (**[2]** install, **[3]** uninstall, **[4]** diagnose, **[5]** sync-alias). **`install_xyz.py`** is invoked **without** `--yes`, so Python may ask again (double confirmation is intentional). For full-screen TUI, use `python install_xyz.py --tui`.
+- **`installer.bat`** (repo root, CMD): interactive **menu** (not full-screen TUI). **ANSI/VT**: enabled automatically when `scripts/enable_conhost_vt.ps1` succeeds; `ESC` is set via PowerShell so colors work under **PowerShell** hosts. **Confirmations** use `[Y/n]` (`set /p`; Enter = Yes) for uv, `.venv` bootstrap, **[1]** refresh, and **[2]–[5]** before `install_xyz.py`. **`install_xyz.py`** runs **without** `--yes`, so Python may ask again. If **`schtasks /create`** fails (policy/elevation), install **continues** and still configures the **CLI shim** and user `PATH`; the logon task can be added manually. Open a **new** terminal after install for `xyz-scrcpy` on `PATH`. Full-screen TUI: `python install_xyz.py --tui`.
 - **TUI installer**: same full-screen style as the main app — `python install_xyz.py --tui` (or `python bin/install_tui.py` from repo root with `PYTHONPATH` set). Use arrow keys and Enter like the device menu.
 - **PowerShell and bare `xyz-scrcpy`**: There is **no** extensionless `xyz-scrcpy` in the repo—only `xyz-scrcpy.cmd`. From the clone directory you must use **`.\xyz-scrcpy.cmd`**; PowerShell will not pick up a command in the current directory without the `.\` prefix. After a full Windows **install**, the default alias adds `%LOCALAPPDATA%\xyz-scrcpy\cli` to your user `PATH` with **`xyz-scrcpy.cmd`** and **`xyz-scrcpy.bat`**; then `xyz-scrcpy` may work from any directory in a **new** terminal (PATH is read at session start). If it still fails, run `where.exe xyz-scrcpy` or `Get-Command xyz-scrcpy*` and `python install_xyz.py --action diagnose`.
 - **Installed CLI**: a successful Windows install adds `%LOCALAPPDATA%\xyz-scrcpy\cli` to your **user** `PATH` and drops **`<alias>.cmd` and `<alias>.bat`** there (same payload; some shells / `PATHEXT` resolve `.bat` more predictably than `.cmd`). Uninstall removes that segment and the shim files when possible.
-- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, how many `Path` segments match the CLI shim, `TEMP`, Python resolution, a Task Scheduler query for `XYZScrcpyMonitor`, and an **adb** block: resolved executable (PATH vs `vendor/adb.exe` vs SDK-style locations), `adb version` when runnable, plus `adb devices` (or a short hint when the list is empty). Add `--clean-user-path` on the same command to strip orphan HKCU `Path` rows that still match the shim directory (then reinstall or run a full uninstall to refresh the marker). Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install; uninstall with `--verbose` logs `schtasks /end` and `/delete` exit codes when the install tree still exists.
+- **Diagnostics**: `python install_xyz.py --action diagnose` (Windows only) prints HKCU `Path` keys, shim/marker paths, how many `Path` segments match the CLI shim, `TEMP`, Python resolution, a Task Scheduler query for `XYZScrcpyMonitor`, and an **adb** block: resolved executable (PATH vs `vendor/adb.exe` vs SDK-style locations), `adb version` when runnable, plus `adb devices` (or a short hint when the list is empty). Add `--clean-user-path` on the same command to strip orphan HKCU `Path` rows that still match the shim directory (then reinstall or run a full uninstall to refresh the marker). Use `python install_xyz.py --action install --yes --verbose` for more console and `config/install.log` detail during install; uninstall with `--verbose` logs `schtasks /end` and `/delete` exit codes when the install tree still exists. If **`schtasks /create`** fails during install, the CLI shim and PATH are still applied when the rest of the install succeeds; check the console `[WARN]` line.
 - **Installer EXE**: Inno Setup script at `packaging/windows/setup.iss` (build with Inno Setup 6’s `ISCC.exe`). Unsigned builds may trigger **SmartScreen**; use “More info” → “Run anyway” if you trust the artifact. The wizard requires **Python 3.10+** (`py -3` or `python`) on `PATH` before files are staged.
 - **Python**: avoid the embeddable distribution without `pip`; the installer checks for `import pip` when resolving the runtime. When several runtimes exist, resolution prefers **`py -3.10`**, then **`py -3.11` … `py -3.19`**, then **`py -3`**, then **`python`** so a generic `py -3` does not accidentally bind to 3.9 before a pinned 3.10+ is tried.
 
 #### Windows risks (Defender, Sandbox, Server Core)
 
 - **Microsoft Defender** or other AV may flag unsigned `.cmd` / `.bat` / `python.exe` invocations from `%LOCALAPPDATA%` or from the Inno extract folder under `%LOCALAPPDATA%\Programs\XYZ-scrcpy`. Allow-list the shim directory and your clone path if installs fail silently or “Access denied” appears.
-- **Windows Sandbox** and locked-down VMs may block `schtasks`, ignore `WM_SETTINGCHANGE`, or restrict registry edits to `HKCU\Environment`. Use `install_xyz.py --action diagnose` to see what failed; the installer skips task creation (with a warning) if `schtasks.exe` is missing (e.g. some **Server Core** images).
+- **Windows Sandbox** and locked-down VMs may block `schtasks`, ignore `WM_SETTINGCHANGE`, or restrict registry edits to `HKCU\Environment`. Use `install_xyz.py --action diagnose` to see what failed; the installer skips task creation (with a warning) if `schtasks.exe` is missing (e.g. some **Server Core** images), or if **`schtasks /create`** returns access denied (install still completes shim + PATH when possible).
+
+### Linux / macOS dev installer (`installer.sh`)
+
+- **`./installer.sh`** (repo root, bash): interactive **menu** (not full-screen TUI). **Colours** when stdout is a TTY and `tput colors` is at least 8; dynamic `=` border width (margin like `bin/menu.py`). **Confirmations** use `[Y/n]` (Enter = yes) for `uv`, `.venv` bootstrap, **[1]** refresh, and **[2]/[3]/[5]** before `install_xyz.py`. **`install_xyz.py`** runs **without** `--yes`, so Python may ask again. Menu **[4]** explains that `install_xyz.py --action diagnose` is **Windows-only** today. Syntax stays compatible with **macOS `/bin/bash` 3.2`** (no Bash 4-only `${var,,}`). Feature matrix and optional follow-ups: [docs/plan-linux-installer-parity.md](docs/plan-linux-installer-parity.md).
+- **WSL + dev menu:** For `./installer.sh` and the same repo-local **`.venv`** layout as on native Linux, prefer a clone on the **Linux filesystem** (e.g. `~/src/xyz-scrcpy`) instead of `/mnt/c/...` (fewer metadata/IO surprises with `uv` and file locks). USB/adb from WSL still follows the general WSL notes in the troubleshooting section below.
 
 ## Android device connectivity (troubleshooting)
 
@@ -83,10 +88,11 @@ Short checklist when `adb devices` is empty or the phone never leaves `unauthori
    cd xyz-scrcpy
    ```
 
-2. Run installer:
+2. Run installer (pick one):
    ```bash
    python3 install_xyz.py
    ```
+   Dev clone menu (installs **`uv`**, creates **`.venv`**, then same Python prompts): `chmod +x installer.sh` once if needed, then `./installer.sh`.
    Optional **full-screen TUI** (same look as the main menu): `python3 install_xyz.py --tui`
 
 3. Installer interactive flow:
@@ -234,7 +240,7 @@ python3 install_xyz.py --action uninstall --yes
 
 ## CI and local validation
 
-Same checks as [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (Linux runs `bash -n` on stubs; skip that step on Windows):
+Same checks as [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (Linux runs `bash -n` on shell scripts; skip that step on Windows):
 
 ```bash
 pip install -r .requirements.txt
@@ -242,7 +248,7 @@ python -m py_compile install_xyz.py win_path_shim.py adb_resolve.py repair_xyz.p
   bin/menu.py bin/config_loader.py bin/monitor.py \
   bin/check_and_repair.py bin/launch_with_checks.py bin/install_tui.py
 python -m unittest discover -s tests -p "test_*.py"
-bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh scripts/clean_dev.sh
+bash -n installer.sh bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh scripts/clean_dev.sh
 ```
 
 ### Development cleanup
@@ -272,9 +278,11 @@ The Windows Inno installer excludes `scripts\` from the shipped tree (dev-only h
 - `pyproject.toml` / `.requirements.txt` — declared Python dependency versions (`psutil`).
 - `CHANGELOG.md` — published version history.
 - `scripts/clean_dev.ps1` / `scripts/clean_dev.sh` — optional dev cleanup (not bundled in the Inno EXE).
-- `scripts/enable_conhost_vt.ps1` — enables process-local VT mode for the current console; used when you opt in to ANSI colors in `installer.bat` (dev clone).
+- `scripts/enable_conhost_vt.ps1` — enables process-local VT mode for the current Windows console; used automatically by `installer.bat` when possible (dev clone).
 - `install_xyz.py` — multi-OS installer and uninstaller.
-- `installer.bat` — Windows **CMD** interactive menu (uv, `.venv`, optional ANSI, `install_xyz.py` actions); dev clone convenience.
+- `installer.bat` — Windows **CMD** interactive menu (uv, `.venv`, auto-VT ANSI when possible, `install_xyz.py` actions); dev clone convenience.
+- `installer.sh` — Linux/macOS **bash** interactive menu (`uv`, `.venv`, ANSI when TTY supports it, `install_xyz.py` actions); dev clone convenience.
+- `docs/plan-linux-installer-parity.md` — parity matrix, verification checklist, optional Linux `install_service` hardening.
 - `adb_resolve.py` — resolve `adb` / `adb.exe` (PATH, `vendor/`, `XYZ_ANDROID_PLATFORM_TOOLS`, standard SDK env paths); used by `bin/menu.py`, `bin/monitor.py`, installer diagnostics.
 - `win_path_shim.py` — Windows user `PATH` shim, `%LOCALAPPDATA%\xyz-scrcpy\cli` `.cmd` launcher, backup/marker helpers.
 - `xyz-scrcpy.cmd` — Windows **development** entry from repo root (requires local `.venv`).
@@ -315,7 +323,8 @@ The Windows Inno installer excludes `scripts\` from the shipped tree (dev-only h
 | Pre-launch check gate | `bin/launch_with_checks.py` | `.sh` is a thin stub on Linux/macOS |
 | Checks + auto-repair pipeline | `bin/check_and_repair.py` | `.sh` delegates here; `repair_xyz.py` for repair |
 | TUI interactive installer | `bin/install_tui.py` / `install_xyz.py --tui` | List navigation and colors shared with `menu.py` |
-| Windows CMD dev menu | `installer.bat` | Y/N gates for uv, venv, ANSI session, and each `install_xyz.py` action (not full-screen TUI) |
+| Windows CMD dev menu | `installer.bat` | uv, `.venv`, auto-VT, dynamic border width, `[Y/n]` + `install_xyz.py` actions |
+| Unix bash dev menu | `installer.sh` | uv, `.venv`, TTY colours + width, `[Y/n]` + `install_xyz.py` actions; diagnose entry is informational (Python diagnose remains Windows-only) |
 | Installer interactive flow | `install_xyz.py` | Line-based prompts; `--yes` / `--action` for automation |
 | Windows PATH CLI shim | `win_path_shim.py` | User `PATH` segment, `%LOCALAPPDATA%\xyz-scrcpy\cli` shims, backup/marker |
 | Service install/enable/disable/stop | `install_xyz.py` | OS-specific handling (Linux/macOS/Windows) |

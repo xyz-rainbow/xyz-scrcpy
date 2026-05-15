@@ -33,4 +33,4 @@ jobs:
 
       - name: Bash syntax (stub scripts)
         if: runner.os != 'Windows'
-        run: bash -n bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh scripts/clean_dev.sh
+        run: bash -n installer.sh bin/monitor.sh bin/check_and_repair.sh bin/launch_with_checks.sh scripts/clean_dev.sh
