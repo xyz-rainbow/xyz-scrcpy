@@ -14,6 +14,9 @@ DEFAULT_CONFIG = {
     "applied_active_recall": False,
     "applied_microphone_bus": False,
     "last_device_serial": "",
+    "last_device_ip": "",
+    "last_wifi_port": 5555,
+    "last_transport": "usb",
     "auto_start": True,
     "auto_discover": True,
     "open_cooldown_seconds": 30,
@@ -82,6 +85,14 @@ def _normalize_config(raw_cfg):
     # Keep legacy key in sync during transition.
     cfg["sound"] = "off" if cfg["audio_target"] == "device" else "output"
     cfg["last_device_serial"] = str(cfg.get("last_device_serial", "") or "")
+    cfg["last_device_ip"] = str(cfg.get("last_device_ip", "") or "").strip()
+    try:
+        wifi_port = int(cfg.get("last_wifi_port", 5555) or 5555)
+    except (TypeError, ValueError):
+        wifi_port = 5555
+    cfg["last_wifi_port"] = max(1, min(wifi_port, 65535))
+    transport = str(cfg.get("last_transport", "usb") or "usb").strip().lower()
+    cfg["last_transport"] = transport if transport in {"usb", "wifi"} else "usb"
     cfg["resolution"] = str(cfg.get("resolution", "1080p"))
     return cfg
 

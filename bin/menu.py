@@ -23,6 +23,10 @@ from pathlib import Path
 
 from config_loader import load_config, save_config
 
+import adb_transport  # noqa: E402
+import alias_sync  # noqa: E402
+from device_tracker import DeviceTracker, connection_event_banner  # noqa: E402
+
 BRAND_NAME = "RAINBOWTECHNOLOGY"
 LOGO = [
     r"██╗  ██╗ ██╗   ██╗ ███████╗",
@@ -42,6 +46,7 @@ RED, GREEN, MAGENTA, ORANGE, WHITE, RESET = (
     "\033[0m",
 )
 NEON_PINK = "\033[38;5;213m"
+GRAY = "\033[90m"
 
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -563,30 +568,43 @@ def stale_managed_launcher_names(current_alias: str) -> list[str]:
 
 
 def sync_alias_launcher(alias) -> tuple[bool, str]:
-    if not INSTALLER_PATH.exists():
-        return False, "Installer not found."
-    try:
-        proc = subprocess.run(
-            [
-                "python3",
-                str(INSTALLER_PATH),
-                "--action",
-                "sync-alias",
-                "--alias",
-                alias,
-                "--yes",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if proc.returncode != 0:
-            detail = (proc.stderr or proc.stdout or "").strip()
-            return False, detail or f"sync-alias failed (exit {proc.returncode})"
-        return True, ""
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, str(exc)
+    return alias_sync.sync_command_alias(normalize_alias(alias), ROOT_DIR)
+
+
+def device_events_log_path() -> Path:
+    return ROOT_DIR / "config" / "device-events.log"
+
+
+def poll_adb_with_tracker(tracker: DeviceTracker | None) -> dict | None:
+    """Refresh tracker from adb; return connection event banner if any."""
+    if tracker is None or not adb_is_available():
+        return None
+    rows = adb_device_lines()
+    connected, disconnected = tracker.observe_adb_rows(rows)
+
+    def label_for(serial: str) -> str:
+        if tracker.get_label(serial, ""):
+            return tracker.get_label(serial, serial)
+        adb = _adb_exe()
+        label = _device_label_for_serial(adb, serial)
+        tracker.set_label(serial, label)
+        return label
+
+    return connection_event_banner(connected, disconnected, label_for)
+
+
+def _cached_device_label(adb: str, serial: str, state_tag: str, tracker: DeviceTracker | None) -> str:
+    if tracker and not tracker.should_refresh_label(serial):
+        cached = tracker.get_label(serial, "")
+        if cached:
+            base = cached
+            if state_tag and f"[{state_tag}]" not in base:
+                return f"{base} [{state_tag}]"
+            return base
+    label = _device_label_for_serial(adb, serial, state_tag)
+    if tracker:
+        tracker.set_label(serial, label.replace(f" [{state_tag}]", "") if state_tag else label)
+    return label
 
 
 def has_audio_pending(cfg):
@@ -704,33 +722,69 @@ def list_devices():
     return devices
 
 
-def list_devices_for_menu(cfg):
-    """Devices for main menu: ready, offline/unauthorized, and last known serial when reachable."""
+def list_devices_for_menu(cfg, tracker: DeviceTracker | None = None):
+    """Devices for main menu: adb rows, debounced tracker, and last known serial."""
     if not adb_is_available():
-        return []
+        return [], None
     adb = _adb_exe()
+    rows = adb_device_lines()
+    event_banner = None
+    if tracker is not None:
+        connected, disconnected = tracker.observe_adb_rows(rows)
+
+        def label_for(s: str) -> str:
+            return tracker.get_label(s, s) or s
+
+        event_banner = connection_event_banner(connected, disconnected, label_for)
+
     by_serial: dict[str, dict] = {}
-    for serial, state in adb_device_lines():
+    stable_ready = tracker.stable_ready_serials() if tracker else None
+
+    for serial, state in rows:
         if state == "device":
-            by_serial[serial] = {"serial": serial, "label": _device_label_for_serial(adb, serial)}
+            connected = True if stable_ready is None else serial in stable_ready
+            tag = "" if connected else "reconnecting"
+            by_serial[serial] = {
+                "serial": serial,
+                "label": _cached_device_label(adb, serial, tag, tracker),
+                "connected": connected,
+            }
         elif state in ("offline", "unauthorized"):
             by_serial[serial] = {
                 "serial": serial,
-                "label": _device_label_for_serial(adb, serial, state),
+                "label": _cached_device_label(adb, serial, state, tracker),
+                "connected": False,
             }
 
     last_serial = (cfg or {}).get("last_device_serial")
     if last_serial and last_serial not in by_serial:
         if adb_serial_reachable(adb, last_serial):
             tag = "reconnecting"
+            connected = False
         else:
-            tag = "last used"
+            tag = "disconnected"
+            connected = False
         by_serial[last_serial] = {
             "serial": last_serial,
-            "label": _device_label_for_serial(adb, last_serial, tag),
+            "label": _cached_device_label(adb, last_serial, tag, tracker),
+            "connected": connected,
         }
+        if tracker:
+            tracker.remember_serial(last_serial, by_serial[last_serial]["label"], connected=False)
 
-    return list(by_serial.values())
+    if tracker:
+        for serial, entry in tracker.known_entries().items():
+            if serial in by_serial:
+                continue
+            if serial == last_serial or entry.get("connected") is False:
+                label = tracker.get_label(serial, serial)
+                by_serial[serial] = {
+                    "serial": serial,
+                    "label": f"{label} [disconnected]" if "[disconnected]" not in label else label,
+                    "connected": False,
+                }
+
+    return list(by_serial.values()), event_banner
 
 
 def main_menu_index_for_serial(devices, serial: str | None) -> int | None:
@@ -1027,7 +1081,7 @@ def launch_scrcpy(serial, cfg) -> bool:
     return ok
 
 
-def render_menu(opts, idx, width, banner=None):
+def render_menu(opts, idx, width, banner=None, muted_indices=None):
     border = "=" * width
     out = []
     if banner:
@@ -1046,10 +1100,17 @@ def render_menu(opts, idx, width, banner=None):
     for line in LOGO:
         out.append(center_line(f"{GREEN}{line.center(width)}{RESET}", width))
     out.append("")
+    muted_set = set(muted_indices or [])
     for i, opt in enumerate(opts):
         label = trunc_text(opt, width - 4)
+        muted = i in muted_set
         if i == idx:
-            line = f"> {ORANGE}{label}{RESET} <"
+            prefix = "> "
+            suffix = " <"
+            body_color = ORANGE if not muted else GRAY
+            line = f"{prefix}{body_color}{label}{RESET}{suffix}"
+        elif muted:
+            line = f"{GRAY}{label}{RESET}"
         else:
             line = label
         out.append(center_line(line, width))
@@ -1208,13 +1269,38 @@ def apps_submenu(serial, banner=None):
             continue
 
 
-def device_submenu(device, cfg, banner=None):
+def _parse_ip_port(text: str, default_port: int) -> tuple[str | None, int]:
+    raw = (text or "").strip()
+    if not raw:
+        return None, default_port
+    if ":" in raw:
+        host, _, port_part = raw.partition(":")
+        try:
+            return host.strip(), int(port_part.strip())
+        except ValueError:
+            return host.strip(), default_port
+    return raw, default_port
+
+
+def device_submenu(device, cfg, banner=None, tracker: DeviceTracker | None = None):
     serial = device["serial"]
-    options = ["Screen Share", "Apps", "Disconnect", "Back"]
+    options = [
+        "Screen Share",
+        "Apps",
+        "Disconnect USB (WiFi prep)",
+        "Disconnect ADB",
+        "Connect USB",
+        "Connect WiFi",
+        "Back",
+    ]
     idx = 0
     local_banner = banner
     updated_cfg = dict(cfg)
+    adb = _adb_exe()
     while True:
+        event_banner = poll_adb_with_tracker(tracker)
+        if event_banner:
+            local_banner = event_banner
         width = terminal_width()
         decorated = [f"{opt} ({serial})" if opt != "Back" else opt for opt in options]
         lines = render_menu(decorated, idx, width, banner=local_banner)
@@ -1254,15 +1340,81 @@ def device_submenu(device, cfg, banner=None):
                 local_banner = make_banner("ERROR", err or "Screen Share failed.")
             continue
 
-        if selected == "Disconnect":
-            if not confirm_action(f"Disconnect device '{serial}'?", default_no=True):
+        if selected == "Disconnect USB (WiFi prep)":
+            if not confirm_action(f"Prepare WiFi and disconnect USB for '{serial}'?", default_no=True):
+                local_banner = make_banner("WARN", "Cancelled.")
+                continue
+            port = int(updated_cfg.get("last_wifi_port", 5555) or 5555)
+            if adb_transport.classify_serial(serial) == "usb":
+                ip, ip_err = adb_transport.get_device_ip(adb, serial, run_command)
+                if ip:
+                    updated_cfg["last_device_ip"] = ip
+                ok_tcp, tcp_msg = adb_transport.enable_tcpip(adb, serial, port, run_command)
+                if not ok_tcp:
+                    local_banner = make_banner("ERROR", tcp_msg)
+                    continue
+                ok_disc, disc_msg = adb_transport.disconnect_session(adb, serial, run_command)
+                if ok_disc:
+                    updated_cfg["last_device_serial"] = serial
+                    updated_cfg["last_transport"] = "wifi"
+                    save_config(updated_cfg)
+                    updated_cfg = load_config()
+                    hint = f" WiFi IP saved: {ip}." if ip else f" Set IP manually for connect. {ip_err}"
+                    local_banner = make_banner("OK", f"USB adb released.{hint}")
+                else:
+                    local_banner = make_banner("ERROR", disc_msg)
+            else:
+                local_banner = make_banner("WARN", "Already on TCP/WiFi serial; use Disconnect ADB.")
+            continue
+
+        if selected == "Disconnect ADB":
+            if not confirm_action(f"Disconnect ADB session '{serial}'?", default_no=True):
                 local_banner = make_banner("WARN", "Disconnect cancelled.")
                 continue
-            ok, out, err, _ = adb_disconnect(serial)
-            if ok:
-                local_banner = make_banner("OK", f"Disconnected: {serial}")
+            ok_disc, disc_msg = adb_transport.disconnect_session(adb, serial, run_command)
+            if ok_disc:
+                local_banner = make_banner("OK", f"ADB disconnected: {serial}")
             else:
-                local_banner = make_banner("ERROR", f"Disconnect failed: {err or out or 'unknown error'}")
+                local_banner = make_banner("ERROR", disc_msg)
+            continue
+
+        if selected == "Connect USB":
+            ok_usb, usb_msg = adb_transport.switch_usb(adb, serial, run_command)
+            if ok_usb:
+                updated_cfg["last_transport"] = "usb"
+                save_config(updated_cfg)
+                updated_cfg = load_config()
+                local_banner = make_banner("OK", usb_msg or "USB mode requested; replug cable if needed.")
+            else:
+                local_banner = make_banner("ERROR", usb_msg)
+            continue
+
+        if selected == "Connect WiFi":
+            port = int(updated_cfg.get("last_wifi_port", 5555) or 5555)
+            ip = updated_cfg.get("last_device_ip", "")
+            if not ip and adb_transport.classify_serial(serial) == "usb":
+                detected, _err = adb_transport.get_device_ip(adb, serial, run_command)
+                if detected:
+                    ip = detected
+            if not ip:
+                entered = prompt_text_input("Device IP (optional :port)", ip or "192.168.1.100")
+                ip, port = _parse_ip_port(entered, port)
+            if not ip:
+                local_banner = make_banner("ERROR", "No IP address provided.")
+                continue
+            ok_conn, wifi_serial, conn_msg = adb_transport.connect_wifi(adb, ip, port, run_command)
+            if ok_conn:
+                updated_cfg["last_device_ip"] = ip
+                updated_cfg["last_wifi_port"] = port
+                updated_cfg["last_device_serial"] = wifi_serial
+                updated_cfg["last_transport"] = "wifi"
+                save_config(updated_cfg)
+                updated_cfg = load_config()
+                if tracker:
+                    tracker.remember_serial(wifi_serial, f"{ip} ({wifi_serial})", connected=True)
+                local_banner = make_banner("OK", f"Connected: {wifi_serial}")
+            else:
+                local_banner = make_banner("ERROR", conn_msg)
             continue
 
         if selected == "Apps":
@@ -1452,8 +1604,8 @@ def settings_screen(cfg):
                 temp_cfg["command_alias"] = normalize_alias(temp_cfg["command_alias"])
                 temp_cfg = normalize_audio_preferences(temp_cfg)
                 save_config(temp_cfg)
-                sync_ok, sync_err = sync_alias_launcher(temp_cfg["command_alias"])
-                return load_config(), "apply", sync_err if not sync_ok else ""
+                sync_ok, sync_msg = sync_alias_launcher(temp_cfg["command_alias"])
+                return load_config(), "apply", sync_msg if sync_ok else f"Alias sync failed: {sync_msg}"
             elif name == "CANCEL":
                 return cfg, "cancel", ""
             else:
@@ -1500,10 +1652,16 @@ def main():
             banner_parts.append(device_hint)
     if banner_parts:
         banner = make_banner("WARN", " | ".join(banner_parts))
+    tracker = DeviceTracker(device_events_log_path())
+    last_serial_boot = cfg.get("last_device_serial")
+    if last_serial_boot:
+        tracker.remember_serial(str(last_serial_boot), connected=False)
     try:
         while True:
             width = terminal_width()
-            devices = list_devices_for_menu(cfg)
+            devices, event_banner = list_devices_for_menu(cfg, tracker)
+            if event_banner:
+                banner = event_banner
             if restore_menu_serial:
                 restored = main_menu_index_for_serial(devices, restore_menu_serial)
                 if restored is not None:
@@ -1519,8 +1677,15 @@ def main():
             if idx >= len(opts):
                 idx = 0
 
+            muted_indices = [
+                i for i, d in enumerate(devices) if not d.get("connected", True)
+            ]
             os.system("cls" if os.name == "nt" else "clear")
-            sys.stdout.write("\n".join(render_menu(opts, idx, width, banner=banner)))
+            sys.stdout.write(
+                "\n".join(
+                    render_menu(opts, idx, width, banner=banner, muted_indices=muted_indices)
+                )
+            )
             sys.stdout.flush()
 
             key = wait_menu_key(MAIN_MENU_DEVICE_POLL_SEC)
@@ -1532,7 +1697,7 @@ def main():
                         ttl=2,
                     )
                 elif adb_is_available():
-                    hint = adb_devices_status_message()
+                    hint = adb_devices_status_message(cfg)
                     if hint:
                         banner = make_banner("WARN", hint, ttl=2)
                     else:
@@ -1546,7 +1711,9 @@ def main():
             elif key == "\r":
                 if idx < len(devices):
                     selected_device = devices[idx]
-                    cfg, sub_banner = device_submenu(selected_device, cfg, banner=banner)
+                    cfg, sub_banner = device_submenu(
+                        selected_device, cfg, banner=banner, tracker=tracker
+                    )
                     if sub_banner is not None:
                         banner = sub_banner
                     restore_menu_serial = selected_device["serial"]
@@ -1559,11 +1726,12 @@ def main():
                 if selected == "SETTINGS":
                     cfg, settings_action, sync_err = settings_screen(cfg)
                     if settings_action == "apply":
-                        if sync_err:
-                            banner = make_banner(
-                                "ERROR",
-                                f"Settings saved but alias sync failed: {sync_err}",
-                            )
+                        if sync_err and sync_err.startswith("Alias sync failed"):
+                            banner = make_banner("ERROR", f"Settings saved but {sync_err}")
+                        elif sync_err and sync_err.startswith("Launcher updated"):
+                            banner = make_banner("OK", sync_err)
+                        elif sync_err:
+                            banner = make_banner("ERROR", sync_err)
                         else:
                             banner = make_banner("OK", "Settings updated.")
                         restore_menu_serial = cfg.get("last_device_serial")

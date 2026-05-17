@@ -215,9 +215,11 @@ class AudioConfigTests(unittest.TestCase):
         # Move to cooldown -> Enter precise edit -> move to APPLY -> Enter apply.
         mock_get_key.side_effect = ["\x1b[B", "\x1b[B", "\r"] + (["\x1b[B"] * 7) + ["\r"]
 
-        _, result, sync_err = menu.settings_screen(cfg)
+        _, result, settings_note = menu.settings_screen(cfg)
         self.assertEqual(result, "apply")
-        self.assertEqual(sync_err, "")
+        self.assertTrue(
+            settings_note == "" or settings_note.startswith("Launcher updated")
+        )
         saved_cfg = mock_save.call_args[0][0]
         self.assertEqual(saved_cfg["open_cooldown_seconds"], 45)
 

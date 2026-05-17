@@ -76,11 +76,10 @@ class SyncAliasLauncherTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "bin"))
         import menu  # noqa: E402
 
-        with patch("menu.INSTALLER_PATH") as mock_path, patch(
-            "menu.subprocess.run",
-            return_value=MagicMock(returncode=1, stdout="", stderr="sync failed"),
+        with patch(
+            "menu.alias_sync.sync_command_alias",
+            return_value=(False, "sync failed"),
         ):
-            mock_path.exists.return_value = True
             ok, err = menu.sync_alias_launcher("xyz-scrcpy")
         self.assertFalse(ok)
         self.assertIn("sync failed", err)

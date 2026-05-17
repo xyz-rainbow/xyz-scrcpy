@@ -62,7 +62,7 @@ class ListDevicesForMenuTests(unittest.TestCase):
             patch("menu.adb_device_lines", return_value=[("ABC123", "offline")]),
             patch("menu._device_label_for_serial", return_value="Phone (ABC123) [offline]"),
         ):
-            devices = menu.list_devices_for_menu({})
+            devices, _event = menu.list_devices_for_menu({})
         self.assertEqual(len(devices), 1)
         self.assertEqual(devices[0]["serial"], "ABC123")
 
@@ -74,7 +74,7 @@ class ListDevicesForMenuTests(unittest.TestCase):
             patch("menu.adb_serial_reachable", return_value=False),
             patch("menu._device_label_for_serial", return_value="141a98fa [last used]"),
         ):
-            devices = menu.list_devices_for_menu({"last_device_serial": "141a98fa"})
+            devices, _event = menu.list_devices_for_menu({"last_device_serial": "141a98fa"})
         self.assertEqual(len(devices), 1)
         self.assertEqual(devices[0]["serial"], "141a98fa")
 
@@ -94,7 +94,7 @@ class ListDevicesForMenuTests(unittest.TestCase):
             patch("menu.adb_serial_reachable", return_value=True),
             patch("menu._device_label_for_serial", return_value="141a98fa [reconnecting]"),
         ):
-            devices = menu.list_devices_for_menu({"last_device_serial": "141a98fa"})
+            devices, _event = menu.list_devices_for_menu({"last_device_serial": "141a98fa"})
         self.assertEqual(len(devices), 1)
         self.assertEqual(devices[0]["serial"], "141a98fa")
 
@@ -105,7 +105,7 @@ class ListDevicesForMenuTests(unittest.TestCase):
             patch("menu.adb_device_lines", return_value=[("XYZ", "unauthorized")]),
             patch("menu._device_label_for_serial", return_value="Phone (XYZ) [unauthorized]"),
         ):
-            devices = menu.list_devices_for_menu({})
+            devices, _event = menu.list_devices_for_menu({})
         self.assertEqual(len(devices), 1)
         self.assertIn("unauthorized", devices[0]["label"])
 
@@ -122,7 +122,7 @@ class ListDevicesForMenuTests(unittest.TestCase):
                 side_effect=lambda _adb, serial, tag="": f"{serial}{'-' + tag if tag else ''}",
             ),
         ):
-            devices = menu.list_devices_for_menu({})
+            devices, _event = menu.list_devices_for_menu({})
         self.assertEqual(len(devices), 1)
 
 
@@ -138,8 +138,8 @@ class MainMenuPollIntegrationTests(unittest.TestCase):
         self, _hint, _adb_ok, _load, mock_list, mock_wait, _write, _clear
     ):
         mock_list.side_effect = [
-            [],
-            [{"serial": "ABC123", "label": "Phone (ABC123)"}],
+            ([], None),
+            ([{"serial": "ABC123", "label": "Phone (ABC123)"}], None),
         ]
         with patch("menu.fcntl.flock"), patch("builtins.open", unittest.mock.mock_open()):
             menu.main()
