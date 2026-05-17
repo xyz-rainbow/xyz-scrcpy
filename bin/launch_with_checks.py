@@ -34,27 +34,19 @@ def open_detached_menu_terminal() -> bool:
         return False
     if platform.system() != "Linux":
         return False
-    if not os.environ.get("DISPLAY") or not os.environ.get("XDG_RUNTIME_DIR"):
-        return False
-    gnome = shutil.which("gnome-terminal")
-    if not gnome:
-        return False
+    import terminal_open
+
     script = str(Path(__file__).resolve())
-    cmd = [
-        gnome,
-        "--hide-menubar",
-        "--geometry=40x18",
-        "--title=XYZ Launcher",
-        "--",
-        "bash",
-        "-lc",
-        f'XYZ_LAUNCHER_WINDOW=1 exec "{_py()}" "{script}"',
-    ]
-    try:
-        subprocess.Popen(cmd, cwd=str(REPO_DIR), start_new_session=True)
-        return True
-    except OSError:
-        return False
+    env = {"XYZ_LAUNCHER_WINDOW": "1"}
+    result = terminal_open.open_command_in_terminal(
+        argv=[_py(), script],
+        cwd=REPO_DIR,
+        geometry="40x18",
+        title="XYZ Launcher",
+        env=env,
+        hide_menubar=True,
+    )
+    return result.ok
 
 
 def start_background_full_checks() -> None:

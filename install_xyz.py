@@ -14,10 +14,17 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import win_path_shim as wps
 import adb_resolve
+
+_BIN_DIR = Path(__file__).resolve().parent / "bin"
+if str(_BIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_BIN_DIR))
+import terminal_open  # noqa: E402
+from terminal_open import TerminalOpenResult  # noqa: E402
 
 
 APP_NAME = "xyz-scrcpy"
@@ -173,10 +180,39 @@ def copy_project(src_root: Path, dst_root: Path) -> None:
     shutil.copytree(src_root, dst_root, ignore=ignore)
 
 
+@dataclass
+class RuntimeStatus:
+    method: str
+    message: str = ""
+
+
 def python_for_post_install(install_dir: Path, os_name: str) -> str:
     if os_name == "windows":
         return str(install_dir / ".venv" / "Scripts" / "python.exe")
+    venv_py = install_dir / ".venv" / "bin" / "python3"
+    if venv_py.is_file():
+        return str(venv_py)
     return shutil.which("python3") or "python3"
+
+
+def _python_has_pip(py: str) -> bool:
+    proc = subprocess.run(
+        [py, "-m", "pip", "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
+def _python_imports_psutil(py: str) -> bool:
+    proc = subprocess.run(
+        [py, "-c", "import psutil"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode == 0
 
 
 def ensure_windows_runtime_venv(install_dir: Path) -> None:
@@ -194,11 +230,90 @@ def ensure_windows_runtime_venv(install_dir: Path) -> None:
     run_cmd([uv, "pip", "install", "-r", str(req)], check=True)
 
 
-def ensure_linux_psutil() -> None:
+def ensure_linux_runtime(install_dir: Path, *, verbose: bool = False) -> RuntimeStatus:
+    """Install Python deps into install_dir/.venv when possible (uv > venv+pip > warn)."""
+    req = install_dir / ".requirements.txt"
+    venv_dir = install_dir / ".venv"
+    venv_py = venv_dir / "bin" / "python3"
+    uv = shutil.which("uv")
+
+    if uv and req.is_file():
+        try:
+            run_cmd([uv, "venv", str(venv_dir)], check=True)
+            run_cmd([uv, "pip", "install", "-r", str(req)], check=True)
+            msg = "Linux runtime: uv venv + requirements installed."
+            print(msg)
+            wps.log_install_line(install_dir, msg, verbose=verbose)
+            return RuntimeStatus("venv_ok", msg)
+        except subprocess.CalledProcessError as exc:
+            warn = f"[WARN] uv venv/pip failed: {exc}"
+            print(warn)
+            wps.log_install_line(install_dir, warn, verbose=verbose)
+
     py = shutil.which("python3")
     if not py:
+        msg = (
+            "[WARN] python3 not found. Install python3-venv and python3-pip, or install uv: "
+            "https://github.com/astral-sh/uv"
+        )
+        print(msg)
+        wps.log_install_line(install_dir, msg, verbose=verbose)
+        return RuntimeStatus("failed", msg)
+
+    if _python_has_pip(py) and req.is_file():
+        try:
+            run_cmd([py, "-m", "venv", str(venv_dir)], check=False)
+            if venv_py.is_file():
+                proc = subprocess.run(
+                    [str(venv_py), "-m", "pip", "install", "-r", str(req)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc.returncode == 0 and _python_imports_psutil(str(venv_py)):
+                    msg = "Linux runtime: stdlib venv + pip install OK."
+                    print(msg)
+                    wps.log_install_line(install_dir, msg, verbose=verbose)
+                    return RuntimeStatus("venv_ok", msg)
+                if "externally-managed-environment" in (proc.stderr or ""):
+                    hint = (
+                        "[WARN] PEP 668 blocked pip in venv; install uv or: "
+                        "sudo apt install python3-venv python3-pip"
+                    )
+                    print(hint)
+                    wps.log_install_line(install_dir, hint, verbose=verbose)
+        except OSError as exc:
+            wps.log_install_line(install_dir, f"[WARN] venv create failed: {exc}", verbose=verbose)
+
+        proc = subprocess.run(
+            [py, "-m", "pip", "install", "--user", "psutil>=5.9"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0 and _python_imports_psutil(py):
+            msg = "Linux runtime: psutil installed with pip --user."
+            print(msg)
+            wps.log_install_line(install_dir, msg, verbose=verbose)
+            return RuntimeStatus("pip_user", msg)
+
+    msg = (
+        "[WARN] Could not install psutil (pip missing or blocked). "
+        "Try: sudo apt install python3-venv python3-pip adb scrcpy\n"
+        "Or install uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    )
+    print(msg)
+    wps.log_install_line(install_dir, msg, verbose=verbose)
+    return RuntimeStatus("failed", msg)
+
+
+def verify_linux_psutil(install_dir: Path, os_name: str) -> None:
+    if os_name != "linux":
         return
-    run_cmd([py, "-m", "pip", "install", "--user", "psutil>=5.9"], check=False)
+    py = python_for_post_install(install_dir, os_name)
+    if _python_imports_psutil(py):
+        return
+    print(f"[WARN] psutil not importable with {py}; monitor may fail until dependencies are fixed.")
 
 
 def write_launcher(os_name: str, launcher: Path, install_dir: Path) -> None:
@@ -252,6 +367,11 @@ def save_alias_to_config(install_dir: Path, alias: str) -> None:
 def linux_service_content(install_dir: Path) -> str:
     monitor = install_dir / "bin" / "monitor.sh"
     log_path = install_dir / "config" / "scrcpy.log"
+    display = os.environ.get("DISPLAY", ":0")
+    session_type = os.environ.get("XDG_SESSION_TYPE", "")
+    env_lines = f"Environment=DISPLAY={display}\n"
+    if session_type:
+        env_lines += f"Environment=XDG_SESSION_TYPE={session_type}\n"
     return f"""[Unit]
 Description=XYZ / Rainbowtechnology - scrcpy Auto-Monitor Service
 After=network.target
@@ -260,9 +380,7 @@ After=network.target
 ExecStart=/bin/bash {monitor}
 Restart=always
 RestartSec=10
-Environment=DISPLAY=:0
-Environment=XDG_SESSION_TYPE=wayland
-StandardOutput=append:{log_path}
+{env_lines}StandardOutput=append:{log_path}
 StandardError=append:{log_path}
 
 [Install]
@@ -290,16 +408,37 @@ def mac_plist_content(install_dir: Path) -> str:
 """
 
 
-def install_service(os_name: str, service_file: Path, install_dir: Path, enable_service: bool) -> None:
+def install_service(
+    os_name: str,
+    service_file: Path,
+    install_dir: Path,
+    enable_service: bool,
+    *,
+    verbose: bool = False,
+) -> None:
     if os_name == "linux":
         service_file.parent.mkdir(parents=True, exist_ok=True)
         service_file.write_text(linux_service_content(install_dir), encoding="utf-8")
-        run_cmd(["systemctl", "--user", "daemon-reload"])
-        if enable_service:
-            run_cmd(["systemctl", "--user", "enable", "--now", "scrcpy-auto.service"])
-        else:
-            run_cmd(["systemctl", "--user", "disable", "scrcpy-auto.service"], check=False)
-            run_cmd(["systemctl", "--user", "stop", "scrcpy-auto.service"], check=False)
+        if not shutil.which("systemctl"):
+            msg = "[WARN] systemctl not found; skipping user service setup."
+            print(msg)
+            wps.log_install_line(install_dir, msg, verbose=verbose)
+            return
+        try:
+            run_cmd(["systemctl", "--user", "daemon-reload"])
+            if enable_service:
+                run_cmd(["systemctl", "--user", "enable", "--now", "scrcpy-auto.service"])
+            else:
+                run_cmd(["systemctl", "--user", "disable", "scrcpy-auto.service"], check=False)
+                run_cmd(["systemctl", "--user", "stop", "scrcpy-auto.service"], check=False)
+        except subprocess.CalledProcessError as exc:
+            msg = (
+                f"[WARN] systemctl --user failed (exit {exc.returncode}). "
+                "User session or systemd user instance may be unavailable (SSH/WSL). "
+                "Install completed; enable manually: systemctl --user enable --now scrcpy-auto.service"
+            )
+            print(msg)
+            wps.log_install_line(install_dir, msg, verbose=verbose)
         return
     if os_name == "darwin":
         service_file.parent.mkdir(parents=True, exist_ok=True)
@@ -426,8 +565,23 @@ def check_dependencies(os_name: str, *, verbose: bool = False, project_root: Pat
         if verbose:
             logging.getLogger("xyz_install").info(msg)
         print("Installation will continue, but runtime may fail until dependencies are installed.")
+        if os_name == "linux" and any(d in missing for d in ("adb", "scrcpy")):
+            print("Debian/Ubuntu hint: sudo apt install adb scrcpy")
     if os_name == "linux" and shutil.which("pactl") is None:
         print("Notice: 'pactl' not found. Microphone Bus feature (xyz-mic-input) will fallback gracefully.")
+    if os_name == "linux":
+        emulators = (
+            "gnome-terminal",
+            "x-terminal-emulator",
+            "xfce4-terminal",
+            "konsole",
+            "xterm",
+        )
+        if not any(shutil.which(e) for e in emulators):
+            print(
+                "Notice: no common terminal emulator on PATH. "
+                "Post-install mini window may not open; try: sudo apt install gnome-terminal"
+            )
 
 
 def run_post_install_checks(install_dir: Path, os_name: str) -> tuple[str, str]:
@@ -462,43 +616,80 @@ def show_check_log(install_dir: Path) -> None:
     print("--- end of check.log ---\n")
 
 
-def open_initial_menu(os_name: str, install_dir: Path, prechecked_status: str | None = None) -> None:
+def _launcher_check_env(prechecked_status: str | None) -> dict[str, str]:
+    env: dict[str, str] = {"XYZ_LAUNCHER_WINDOW": "1"}
+    if prechecked_status:
+        env["XYZ_CHECKS_ALREADY_DONE"] = "1"
+        env["XYZ_CHECKS_STATUS"] = prechecked_status
+    return env
+
+
+def open_initial_menu(
+    os_name: str,
+    install_dir: Path,
+    prechecked_status: str | None = None,
+) -> TerminalOpenResult:
     launcher_py = install_dir / "bin" / "launch_with_checks.py"
     py = python_for_post_install(install_dir, os_name)
-    env_prefix = ""
-    if prechecked_status:
-        env_prefix = f"XYZ_CHECKS_ALREADY_DONE=1 XYZ_CHECKS_STATUS={prechecked_status} "
+    return terminal_open.open_command_in_terminal(
+        argv=[py, str(launcher_py)],
+        cwd=install_dir,
+        geometry="40x18",
+        title="XYZ Initial Menu",
+        env=_launcher_check_env(prechecked_status),
+        hide_menubar=(os_name == "linux"),
+    )
+
+
+def run_menu_inline(
+    os_name: str,
+    install_dir: Path,
+    prechecked_status: str | None = None,
+) -> None:
+    launcher_py = install_dir / "bin" / "launch_with_checks.py"
+    py = python_for_post_install(install_dir, os_name)
+    env = dict(os.environ)
+    env.update(_launcher_check_env(prechecked_status))
+    env.pop("XYZ_LAUNCHER_WINDOW", None)
+    subprocess.run([py, str(launcher_py)], check=False, cwd=str(install_dir), env=env)
+
+
+def report_initial_menu_result(
+    result: TerminalOpenResult,
+    alias: str,
+    *,
+    non_interactive: bool,
+    verbose: bool = False,
+    os_name: str = "linux",
+    install_dir: Path | None = None,
+) -> None:
+    line = (
+        f"terminal_open ok={result.ok} method={result.method!r} reason={result.reason!r} tried={result.tried}"
+    )
+    if install_dir:
+        wps.log_install_line(install_dir, line, verbose=verbose)
+    if verbose:
+        print(f"[verbose] {line}")
+
+    if result.ok:
+        print(f"Mini terminal opened ({result.method}).")
+        return
+
+    print("Could not open a graphical terminal for the initial menu.")
+    if result.reason:
+        print(f"  Reason: {result.reason}")
+    if result.tried:
+        print(f"  Tried: {', '.join(result.tried)}")
     if os_name == "linux":
-        run_cmd(
-            [
-                "gnome-terminal",
-                "--hide-menubar",
-                "--geometry=40x18",
-                "--title=XYZ Initial Menu",
-                "--",
-                "bash",
-                "-lc",
-                f"{env_prefix}XYZ_LAUNCHER_WINDOW=1 {shlex.quote(py)} {shlex.quote(str(launcher_py))}",
-            ],
-            check=False,
-        )
+        print("  Hint: sudo apt install gnome-terminal   (or: sudo apt install xterm)")
+    print(f"  Launch manually: {alias}")
+
+    if non_interactive or not sys.stdin.isatty():
         return
-    if os_name == "windows":
-        env = dict(os.environ)
-        if prechecked_status:
-            env["XYZ_CHECKS_ALREADY_DONE"] = "1"
-            env["XYZ_CHECKS_STATUS"] = prechecked_status
-        subprocess.run([py, str(launcher_py)], check=False, cwd=str(install_dir), env=env)
-        return
-    if prechecked_status:
-        subprocess.run(
-            [py, str(launcher_py)],
-            check=False,
-            text=True,
-            env={**os.environ, "XYZ_CHECKS_ALREADY_DONE": "1", "XYZ_CHECKS_STATUS": prechecked_status},
-        )
-        return
-    run_cmd([py, str(launcher_py)], check=False)
+    answer = input("Open menu in this terminal now? (Y/n): ").strip().lower()
+    if not answer or answer in ("y", "yes"):
+        if install_dir:
+            run_menu_inline(os_name, install_dir)
 
 
 def do_install(
@@ -510,6 +701,8 @@ def do_install(
     run_tests_and_log: bool,
     *,
     verbose: bool = False,
+    no_open_terminal: bool = False,
+    non_interactive: bool = False,
 ) -> None:
     if verbose:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -524,14 +717,25 @@ def do_install(
         if os_name == "windows":
             ensure_windows_runtime_venv(paths["install_dir"])
         elif os_name == "linux":
-            ensure_linux_psutil()
+            runtime = ensure_linux_runtime(paths["install_dir"], verbose=verbose)
+            wps.log_install_line(
+                paths["install_dir"],
+                f"linux_runtime method={runtime.method} {runtime.message}",
+                verbose=verbose,
+            )
         save_alias_to_config(paths["install_dir"], alias)
         launch_path = launcher_path(os_name, paths["launcher_dir"], alias)
         previous_path = launcher_path(os_name, paths["launcher_dir"], previous_alias)
         if previous_path != launch_path and previous_path.exists():
             previous_path.unlink()
         write_launcher(os_name, launch_path, paths["install_dir"])
-        install_service(os_name, paths["service_file"], paths["install_dir"], enable_service)
+        install_service(
+            os_name,
+            paths["service_file"],
+            paths["install_dir"],
+            enable_service,
+            verbose=verbose,
+        )
         if os_name == "windows":
             pl = paths["install_dir"] / "config" / "path_changes.log"
             try:
@@ -545,6 +749,7 @@ def do_install(
         raise
     print("Install completed.")
     print(f"Launcher: {launch_path}")
+    verify_linux_psutil(paths["install_dir"], os_name)
     if os_name == "linux" and enable_service:
         print("Linux: user unit installed/enabled — start or check with: systemctl --user start scrcpy-auto.service")
     elif os_name == "linux":
@@ -561,13 +766,35 @@ def do_install(
         if status == "FAIL_OPEN":
             print("Checks still failing after repair.")
             print("Please report in GitHub Issues: https://github.com/xyz-rainbow/xyz-scrcpy/issues")
-        print("Opening initial mini terminal...")
-        open_initial_menu(os_name, paths["install_dir"], prechecked_status=status)
+        if no_open_terminal:
+            print("Skipping initial mini terminal (--no-open-terminal).")
+        else:
+            print("Opening initial mini terminal...")
+            result = open_initial_menu(os_name, paths["install_dir"], prechecked_status=status)
+            report_initial_menu_result(
+                result,
+                alias,
+                non_interactive=non_interactive,
+                verbose=verbose,
+                os_name=os_name,
+                install_dir=paths["install_dir"],
+            )
     else:
         print("Tests skipped by user. Menu can still open in fail-open mode.")
         print("If issues appear, report in GitHub Issues: https://github.com/xyz-rainbow/xyz-scrcpy/issues")
-        print("Opening initial mini terminal...")
-        open_initial_menu(os_name, paths["install_dir"])
+        if no_open_terminal:
+            print("Skipping initial mini terminal (--no-open-terminal).")
+        else:
+            print("Opening initial mini terminal...")
+            result = open_initial_menu(os_name, paths["install_dir"])
+            report_initial_menu_result(
+                result,
+                alias,
+                non_interactive=non_interactive,
+                verbose=verbose,
+                os_name=os_name,
+                install_dir=paths["install_dir"],
+            )
 
 
 def _safe_delete_repo_copy(repo_dir: Path) -> bool:
@@ -677,6 +904,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Interactive full-screen installer (same TUI style as bin/menu.py).",
     )
+    parser.add_argument(
+        "--no-open-terminal",
+        action="store_true",
+        help="Do not spawn the post-install mini terminal (CI/headless).",
+    )
     return parser.parse_args()
 
 
@@ -749,6 +981,8 @@ def main() -> int:
                     enable_service,
                     run_tests_and_log,
                     verbose=args.verbose,
+                    no_open_terminal=args.no_open_terminal,
+                    non_interactive=args.yes,
                 )
             else:
                 do_sync_alias(paths, os_name, alias)

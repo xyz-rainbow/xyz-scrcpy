@@ -79,7 +79,7 @@ class InstallerTests(unittest.TestCase):
                 patch("install_xyz.write_launcher"),
                 patch("install_xyz.save_alias_to_config"),
                 patch("install_xyz.ensure_windows_runtime_venv"),
-                patch("install_xyz.ensure_linux_psutil"),
+                patch("install_xyz.ensure_linux_runtime", return_value=install_xyz.RuntimeStatus("venv_ok")),
             ):
                 with redirect_stdout(StringIO()):
                     install_xyz.do_install(paths, src, "linux", "xyz-scrcpy", True, False)
@@ -138,6 +138,20 @@ class InstallerTests(unittest.TestCase):
             (repo / "install_xyz.py").write_text("print('x')\n", encoding="utf-8")
             self.assertTrue(install_xyz._safe_delete_repo_copy(repo))
             self.assertFalse(repo.exists())
+
+    def test_open_initial_menu_delegates_to_terminal_open(self):
+        with tempfile.TemporaryDirectory() as td:
+            install_dir = Path(td)
+            (install_dir / "bin").mkdir(parents=True)
+            (install_dir / "bin" / "launch_with_checks.py").write_text("# stub\n", encoding="utf-8")
+            fake = install_xyz.TerminalOpenResult(ok=True, method="gnome-terminal", tried=["gnome-terminal"])
+            with patch("install_xyz.terminal_open.open_command_in_terminal", return_value=fake) as mock_open:
+                result = install_xyz.open_initial_menu("linux", install_dir, prechecked_status="PASS")
+            self.assertTrue(result.ok)
+            mock_open.assert_called_once()
+            call_kw = mock_open.call_args[1]
+            self.assertEqual(call_kw["env"]["XYZ_CHECKS_STATUS"], "PASS")
+            self.assertEqual(call_kw["env"]["XYZ_LAUNCHER_WINDOW"], "1")
 
     def test_project_scripts_use_portable_paths(self):
         with tempfile.TemporaryDirectory() as td:

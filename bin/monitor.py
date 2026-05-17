@@ -306,57 +306,16 @@ def clear_block_reason_state() -> None:
 
 
 def open_menu_terminal(geometry: str, title: str) -> bool:
-    menu = str(MENU_SCRIPT)
+    import terminal_open
+
     py = _python_for_subprocess()
-    system = platform.system()
-    cwd = str(REPO_DIR)
-
-    if system == "Linux":
-        specs: list[list[str]] = [
-            ["gnome-terminal", "--hide-menubar", f"--geometry={geometry}", f"--title={title}", "--", py, menu],
-            ["x-terminal-emulator", "-geometry", geometry, "-title", title, "-e", f"{py} {menu}"],
-            ["xfce4-terminal", f"--geometry={geometry}", f"--title={title}", "--command", f"{py} {menu}"],
-            ["konsole", "--geometry", geometry, "--new-tab", "-e", py, menu],
-        ]
-        cols, _, rows = geometry.partition("x")
-        if rows:
-            specs.append(["xterm", "-geometry", f"{cols}x{rows}", "-T", title, "-e", py, menu])
-        for cmd in specs:
-            if shutil.which(cmd[0]):
-                try:
-                    subprocess.Popen(
-                        cmd,
-                        cwd=cwd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    return True
-                except OSError:
-                    continue
-        return False
-
-    if system == "Darwin" and shutil.which("osascript"):
-        escaped = menu.replace("\\", "\\\\").replace('"', '\\"')
-        script = f'tell application "Terminal" to do script "{py} \\"{escaped}\\""'
-        try:
-            r = subprocess.run(["osascript", "-e", script], cwd=cwd, capture_output=True, text=True)
-            return r.returncode == 0
-        except OSError:
-            return False
-
-    if system == "Windows":
-        env = os.environ.copy()
-        vendor = REPO_DIR / "vendor"
-        if vendor.is_dir():
-            env["PATH"] = str(vendor) + os.pathsep + env.get("PATH", "")
-        flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-        try:
-            subprocess.Popen([py, menu], cwd=cwd, env=env, creationflags=flags)
-            return True
-        except OSError:
-            return False
-
-    return False
+    return terminal_open.open_menu_script(
+        menu_py=MENU_SCRIPT,
+        python_exe=py,
+        cwd=REPO_DIR,
+        geometry=geometry,
+        title=title,
+    )
 
 
 def _pid_lock_acquire() -> None:

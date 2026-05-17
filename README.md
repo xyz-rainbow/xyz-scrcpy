@@ -117,7 +117,22 @@ python3 install_xyz.py --action install --alias scrcpy --yes
 
 # Full uninstall
 python3 install_xyz.py --action uninstall --yes
+
+# CI / SSH / headless: skip post-install GUI window
+python3 install_xyz.py --action install --yes --no-open-terminal
 ```
+
+### Post-install troubleshooting
+
+| Symptom | What to do |
+|---------|------------|
+| Install prints *Opening initial mini terminal…* but no window appears | Install a terminal emulator (`sudo apt install gnome-terminal` on Debian/Ubuntu) or run `xyz-scrcpy` manually in your current shell. The installer lists emulators it tried. |
+| `No module named pip` during install | Install `python3-venv` and `python3-pip`, or install [uv](https://github.com/astral-sh/uv) so the installer can create `~/.local/share/xyz-scrcpy/.venv`. |
+| `Missing dependencies: adb, scrcpy` | `sudo apt install adb scrcpy` (Linux) or add platform-tools / scrcpy to PATH (Windows). |
+| Monitor service does not start | `systemctl --user status scrcpy-auto.service` — user systemd must be available (not all SSH/WSL setups). Install still completes with a warning. |
+| Fail-open / check errors on Linux | Ensure unit tests pass (`python3 -m unittest discover -s tests`). Windows-only registry tests must not import `winreg` on Linux (fixed in `win_path_shim.py`). |
+
+After install, open a **new** terminal if `xyz-scrcpy` is not found (PATH refresh).
 
 ## Current App Features
 

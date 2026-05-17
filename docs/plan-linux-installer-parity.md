@@ -5,7 +5,9 @@ Goal: **`installer.sh`** at the repo root mirrors the **Windows `installer.bat`*
 ## Status
 
 - **`installer.sh`**: implemented (menu, `uv`, bootstrap, colours/width, `[Y/n]`, `install_xyz.py` for install/uninstall/sync-alias; **[4]** informational only because Python `diagnose` is Windows-only).
-- **Still open**: Phase 6 (Linux diagnose / resilient `install_service`), deeper manual QA per Verification section.
+- **Post-install mini terminal**: `bin/terminal_open.py` shared with `monitor.py` / `launch_with_checks.py`; `install_xyz.py` uses emulator fallback chain and `--no-open-terminal` for headless CI.
+- **`install_service` (Linux)**: `systemctl --user` failures are soft-warned (install continues).
+- **Still open**: Linux `install_xyz.py --action diagnose`, deeper manual QA per Verification section.
 
 ## Feature parity matrix
 
