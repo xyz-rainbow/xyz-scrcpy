@@ -26,6 +26,8 @@ _log = logging.getLogger("xyz_install")
 
 # winreg imported lazily for non-Windows test imports
 _winreg: Any = None
+# winreg.REG_EXPAND_SZ (do not use _get_winreg() as a .get() default — it is always evaluated)
+_REG_EXPAND_SZ = 2
 
 
 def _get_winreg():
@@ -194,7 +196,8 @@ def restore_user_path_from_backup(backup_file: Path) -> bool:
     except (json.JSONDecodeError, OSError):
         return False
     path_val = data.get("path")
-    reg_type = int(data.get("reg_type", _get_winreg().REG_EXPAND_SZ))
+    reg_raw = data.get("reg_type")
+    reg_type = int(reg_raw) if reg_raw is not None else _REG_EXPAND_SZ
     if path_val is None:
         return False
     write_user_path_value(str(path_val), reg_type)
@@ -211,7 +214,7 @@ def add_shim_dir_to_user_path(shim_dir: Path, path_log: Path | None = None) -> s
     if current is None:
         raise RuntimeError("Cannot read HKCU\\Environment\\Path (permission or policy).")
     if typ is None:
-        typ = _get_winreg().REG_EXPAND_SZ
+        typ = _REG_EXPAND_SZ
     segments = split_path_segments(current)
     if is_duplicate_segment(canonical, segments):
         _log.info("PATH already contains shim_dir: %s", canonical)
@@ -236,7 +239,7 @@ def remove_segment_from_user_path(segment: str, path_log: Path | None = None) ->
     if current is None:
         return 0
     if typ is None:
-        typ = _get_winreg().REG_EXPAND_SZ
+        typ = _REG_EXPAND_SZ
     segments = split_path_segments(current)
     kept = [s for s in segments if path_key_for_compare(s) != key]
     removed = len(segments) - len(kept)
