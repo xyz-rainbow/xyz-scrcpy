@@ -1,6 +1,7 @@
 """Unit tests for vendor_bootstrap (no network)."""
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -51,10 +52,63 @@ class VendorBootstrapTests(unittest.TestCase):
             scrcpy = vend / ("scrcpy.exe" if os.name == "nt" else "scrcpy")
             scrcpy.write_bytes(b"")
             scrcpy.chmod(scrcpy.stat().st_mode | 0o111)
-            with patch("adb_resolve.shutil.which", return_value=None):
+            (vend / "scrcpy-server").write_bytes(b"")
+            with (
+                patch("adb_resolve.shutil.which", return_value=None),
+                patch.object(vb, "_adb_vendor_usable", return_value=True),
+                patch.object(vb, "_scrcpy_vendor_usable", return_value=True),
+            ):
                 adb_ok, scrcpy_ok = vb.verify_tools_resolved(root)
             self.assertTrue(adb_ok)
             self.assertTrue(scrcpy_ok)
+
+    def test_scrcpy_vendor_usable_rejects_stub_binary(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend = vb.vendor_dir(root)
+            vend.mkdir(parents=True)
+            stub = vb.vendor_scrcpy_path(root)
+            stub.write_bytes(b"not-scrcpy")
+            _chmod = vb._chmod_executable
+            _chmod(stub)
+            (vend / "scrcpy-server").write_bytes(b"x")
+            self.assertFalse(vb._scrcpy_vendor_usable(root))
+
+    def test_extract_scrcpy_tar_replaces_broken_vendor_binary(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend = vb.vendor_dir(root)
+            vend.mkdir(parents=True)
+            stub = vb.vendor_scrcpy_path(root)
+            stub.write_bytes(b"broken")
+            (vend / "scrcpy-server").write_bytes(b"old")
+            bundle = root / "bundle"
+            bundle.mkdir()
+            good_scrcpy = bundle / "scrcpy"
+            good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
+            good_scrcpy.chmod(0o755)
+            (bundle / "scrcpy-server").write_bytes(b"server")
+            tar_path = root / "fake.tar.gz"
+            tar_path.write_bytes(b"x")
+            result = vb.ToolInstallResult()
+
+            class FakeTar:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+                def extractall(self, dest, filter=None):
+                    shutil.copytree(bundle, dest / "scrcpy-linux", dirs_exist_ok=True)
+
+            with (
+                patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
+                patch.object(vb, "_scrcpy_vendor_usable", side_effect=[False, True]),
+            ):
+                ok = vb._extract_scrcpy_tar(tar_path, vend, result)
+            self.assertTrue(ok)
+            self.assertTrue(vb.vendor_scrcpy_path(root).read_bytes().startswith(b"#!"))
 
     def test_stage_vendor_download_skips_scrcpy_on_unsupported_cpu(self):
         with tempfile.TemporaryDirectory() as td:

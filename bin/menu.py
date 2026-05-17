@@ -64,7 +64,78 @@ LIME = "\033[38;5;154m"
 MIC_BUS_NAME = "xyz-mic-input"
 BANNER_COLORS = {"ERROR": RED, "WARN": ORANGE, "OK": GREEN}
 INSTALLABLE_EXTENSIONS = {".apk"}
-ESCAPE_READ_TIMEOUT = 0.03
+ESCAPE_POLL_TIMEOUT = 0.05
+ESCAPE_SEQUENCE_DEADLINE = 0.25
+_ARROW_FINAL_BYTES = frozenset("ABCD")
+
+
+def _normalize_key(seq: str) -> str:
+    """Map SS3 arrow sequences (ESC O x) to CSI form (ESC [ x)."""
+    if len(seq) >= 3 and seq[0] == "\x1b" and seq[1] == "O" and seq[2] in _ARROW_FINAL_BYTES:
+        return "\x1b[" + seq[2]
+    return seq
+
+
+def _escape_sequence_complete(seq: str) -> bool:
+    if len(seq) < 2 or seq[0] != "\x1b":
+        return True
+    if seq[1] == "O":
+        return len(seq) >= 3
+    if seq[1] == "[":
+        if len(seq) >= 3 and seq[-1] in _ARROW_FINAL_BYTES:
+            return True
+        if len(seq) >= 4 and seq[-1].isalpha():
+            return True
+    return False
+
+
+def _stdin_bytes_waiting(fd: int) -> int:
+    if fcntl is None:
+        return 0
+    import array
+
+    buf = array.array("i", [0])
+    try:
+        fcntl.ioctl(fd, termios.FIONREAD, buf)  # type: ignore[attr-defined]
+        return int(buf[0])
+    except (OSError, AttributeError, ValueError):
+        return 0
+
+
+def _read_escape_sequence(first: str, fd: int) -> str:
+    """Read bytes after ESC until a full sequence or deadline (avoid bare ESC on arrows)."""
+    seq = first
+    waiting = _stdin_bytes_waiting(fd)
+    if waiting > 0:
+        try:
+            data = os.read(fd, min(waiting, 64))
+            if data:
+                seq += data.decode("utf-8", errors="replace")
+        except OSError:
+            pass
+    if len(seq) > 1 and _escape_sequence_complete(seq):
+        return _normalize_key(seq)
+    deadline = time.monotonic() + ESCAPE_SEQUENCE_DEADLINE
+    while time.monotonic() < deadline:
+        if len(seq) > 1 and _escape_sequence_complete(seq):
+            return _normalize_key(seq)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        ready, _, _ = select.select([fd], [], [], min(ESCAPE_POLL_TIMEOUT, remaining))
+        if not ready:
+            if len(seq) == 1:
+                continue
+            break
+        try:
+            data = os.read(fd, 1)
+        except OSError:
+            break
+        if data:
+            seq += data.decode("utf-8", errors="replace")
+    if len(seq) == 1:
+        return "\x1b"
+    return _normalize_key(seq)
 
 
 def _adb_exe() -> str:
@@ -84,24 +155,18 @@ def scrcpy_is_available() -> bool:
 
 
 def get_key():
-    if os.name != 'nt':
+    if os.name != "nt":
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
-            ch = sys.stdin.read(1)
+            data = os.read(fd, 1)
+            if not data:
+                return ""
+            ch = data.decode("utf-8", errors="replace")
             if ch != "\x1b":
                 return ch
-
-            seq = ch
-            ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
-            if not ready:
-                return "\x1b"
-            seq += sys.stdin.read(1)
-            ready, _, _ = select.select([sys.stdin], [], [], ESCAPE_READ_TIMEOUT)
-            if ready:
-                seq += sys.stdin.read(1)
-            return seq
+            return _read_escape_sequence(ch, fd)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
     else:
@@ -452,13 +517,59 @@ def normalize_audio_preferences(cfg):
     return normalized
 
 
-def list_devices():
+def adb_device_lines():
+    """Return parsed ``adb devices`` rows as (serial, state) excluding the header."""
     if not adb_is_available():
         return []
     try:
         adb = _adb_exe()
         raw = subprocess.check_output([adb, "devices"], text=True, timeout=30).splitlines()
-        serials = [line.split()[0] for line in raw if line.strip().endswith("device") and not line.startswith("List")]
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return []
+    rows = []
+    for line in raw:
+        line = line.strip()
+        if not line or line.startswith("List of devices"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            rows.append((parts[0], parts[1]))
+    return rows
+
+
+def adb_devices_status_message():
+    """Human hint when adb works but no device is ready for the menu."""
+    if not adb_is_available():
+        return (
+            "adb not found. Re-run install or place platform-tools in vendor/. "
+            "Debian: sudo apt install adb scrcpy"
+        )
+    rows = adb_device_lines()
+    if not rows:
+        return (
+            "adb OK but no phone detected. Enable USB debugging, use a data cable, "
+            "authorize the RSA prompt on the phone, then replug USB."
+        )
+    ready = [serial for serial, state in rows if state == "device"]
+    if ready:
+        return ""
+    hints = []
+    for serial, state in rows:
+        if state == "unauthorized":
+            hints.append(f"{serial}: tap Allow on the phone's USB debugging prompt")
+        elif state == "offline":
+            hints.append(f"{serial}: offline — replug cable or run adb kill-server")
+        else:
+            hints.append(f"{serial}: {state}")
+    return "adb: " + "; ".join(hints)
+
+
+def list_devices():
+    if not adb_is_available():
+        return []
+    try:
+        adb = _adb_exe()
+        serials = [serial for serial, state in adb_device_lines() if state == "device"]
         devices = []
         for serial in serials:
             model = subprocess.check_output(
@@ -1133,11 +1244,11 @@ def main():
     cfg = load_config()
     banner = None
     if not adb_is_available():
-        banner = make_banner(
-            "WARN",
-            "adb not found. Re-run install or place platform-tools in vendor/. "
-            "Debian: sudo apt install adb scrcpy",
-        )
+        banner = make_banner("WARN", adb_devices_status_message())
+    else:
+        device_hint = adb_devices_status_message()
+        if device_hint:
+            banner = make_banner("WARN", device_hint)
     try:
         while True:
             width = terminal_width()

@@ -103,27 +103,35 @@ def prepend_vendor_to_path(install_root: Path) -> None:
 
 def resolve_scrcpy_executable(install_root: Path) -> tuple[str, str]:
     """Return (executable, source_tag) like adb_resolve."""
-    vend = vendor_scrcpy_path(install_root)
-    if vend.is_file() and os.access(vend, os.X_OK):
-        return (str(vend.resolve()), "vendor/scrcpy")
+    if _scrcpy_vendor_usable(install_root):
+        return (str(vendor_scrcpy_path(install_root).resolve()), "vendor/scrcpy")
+    vend = vendor_scrcpy_path(install_root).resolve()
     w = shutil.which("scrcpy")
     if w:
+        try:
+            if Path(w).resolve() == vend:
+                w = None
+        except OSError:
+            pass
+    if w and _scrcpy_cli_usable(w):
         return (w, "PATH")
     return ("scrcpy", "not_found")
 
 
 def verify_tools_resolved(install_root: Path) -> tuple[bool, bool]:
     prepend_vendor_to_path(install_root)
-    adb_exe, adb_src = adb_resolve.resolve_adb_executable(install_root)
-    adb_ok = adb_src != "not_found"
-    if adb_ok and not Path(adb_exe).is_file():
-        adb_ok = shutil.which("adb") is not None
-    scrcpy_exe, scrcpy_src = resolve_scrcpy_executable(install_root)
-    scrcpy_ok = scrcpy_src != "not_found"
-    if scrcpy_ok and scrcpy_exe != "scrcpy" and not Path(scrcpy_exe).is_file():
-        scrcpy_ok = shutil.which("scrcpy") is not None
-    elif scrcpy_ok and scrcpy_exe == "scrcpy":
-        scrcpy_ok = shutil.which("scrcpy") is not None
+    adb_ok = _adb_vendor_usable(install_root)
+    if not adb_ok:
+        adb_exe, adb_src = adb_resolve.resolve_adb_executable(install_root)
+        adb_ok = adb_src != "not_found"
+        if adb_ok and adb_exe != "adb" and not Path(adb_exe).is_file():
+            adb_ok = shutil.which("adb") is not None
+        elif adb_ok and adb_exe == "adb":
+            adb_ok = shutil.which("adb") is not None
+    scrcpy_ok = _scrcpy_vendor_usable(install_root)
+    if not scrcpy_ok:
+        _scrcpy_exe, scrcpy_src = resolve_scrcpy_executable(install_root)
+        scrcpy_ok = scrcpy_src != "not_found"
     return adb_ok, scrcpy_ok
 
 
@@ -230,11 +238,90 @@ def _install_binary_from_path(src: Path, dest: Path) -> bool:
         return False
 
 
+def _adb_vendor_usable(install_root: Path) -> bool:
+    adb_path = vendor_adb_path(install_root)
+    if not adb_path.is_file():
+        return False
+    _chmod_executable(adb_path)
+    try:
+        proc = subprocess.run(
+            [str(adb_path), "version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        merged = (proc.stdout or "") + (proc.stderr or "")
+        return proc.returncode == 0 and "Android Debug Bridge" in merged
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _scrcpy_cli_usable(exe: str, *, cwd: Path | None = None) -> bool:
+    try:
+        proc = subprocess.run(
+            [exe, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            cwd=str(cwd) if cwd else None,
+        )
+        merged = (proc.stdout or "") + (proc.stderr or "")
+        return proc.returncode == 0 and "scrcpy" in merged.lower()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _scrcpy_vendor_usable(install_root: Path) -> bool:
+    scrcpy_path = vendor_scrcpy_path(install_root)
+    if not scrcpy_path.is_file():
+        return False
+    _chmod_executable(scrcpy_path)
+    if not os.access(scrcpy_path, os.X_OK):
+        return False
+    server = vendor_dir(install_root) / "scrcpy-server"
+    if not server.is_file():
+        return False
+    return _scrcpy_cli_usable(str(scrcpy_path), cwd=vendor_dir(install_root))
+
+
+def _remove_stale_scrcpy_vendor(vendor: Path) -> None:
+    for name in ("scrcpy", "scrcpy.exe", "scrcpy-server"):
+        path = vendor / name
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+def _install_scrcpy_bundle_from_tree(bundle_root: Path, vendor: Path, result: ToolInstallResult) -> bool:
+    """Install scrcpy, scrcpy-server, and siblings from an extracted archive tree."""
+    scrcpy_name = "scrcpy.exe" if os.name == "nt" else "scrcpy"
+    found = _find_file_named(bundle_root, scrcpy_name)
+    if not found:
+        _log(result, "scrcpy binary not found in screen-mirror archive", warn=True)
+        return False
+    bundle_dir = found.parent
+    installed_any = False
+    for entry in bundle_dir.iterdir():
+        if not entry.is_file():
+            continue
+        dest = vendor / entry.name
+        if _install_binary_from_path(entry, dest):
+            installed_any = True
+    if not installed_any:
+        return False
+    return _scrcpy_vendor_usable(vendor.parent)
+
+
 def _extract_platform_tools_zip(zip_path: Path, vendor: Path, result: ToolInstallResult) -> bool:
+    install_root = vendor.parent
+    if _adb_vendor_usable(install_root):
+        return True
     adb_name = "adb.exe" if os.name == "nt" else "adb"
     dest = vendor / adb_name
-    if dest.is_file():
-        return True
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             if zf.testzip() is not None:
@@ -256,9 +343,10 @@ def _extract_platform_tools_zip(zip_path: Path, vendor: Path, result: ToolInstal
 
 
 def _extract_scrcpy_tar(tar_path: Path, vendor: Path, result: ToolInstallResult) -> bool:
-    dest = vendor_scrcpy_path(vendor.parent)
-    if dest.is_file():
+    install_root = vendor.parent
+    if _scrcpy_vendor_usable(install_root):
         return True
+    _remove_stale_scrcpy_vendor(vendor)
     try:
         with tarfile.open(tar_path, "r:gz") as tf:
             tmp = Path(tempfile.mkdtemp(prefix="xyz_scrcpy_"))
@@ -267,11 +355,7 @@ def _extract_scrcpy_tar(tar_path: Path, vendor: Path, result: ToolInstallResult)
                     tf.extractall(tmp, filter="data")
                 else:
                     tf.extractall(tmp)
-                found = _find_file_named(tmp, "scrcpy")
-                if not found:
-                    _log(result, "scrcpy binary not found in screen-mirror archive", warn=True)
-                    return False
-                return _install_binary_from_path(found, dest)
+                return _install_scrcpy_bundle_from_tree(tmp, vendor, result)
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
     except (tarfile.TarError, OSError) as exc:
@@ -331,6 +415,8 @@ def stage_vendor_download(install_root: Path, env: EnvInfo, result: ToolInstallR
     vendor = vendor_dir(install_root)
     vendor.mkdir(parents=True, exist_ok=True)
     _write_vendor_notice(vendor)
+    if not _scrcpy_vendor_usable(install_root):
+        _remove_stale_scrcpy_vendor(vendor)
     adb_ok, scrcpy_ok = verify_tools_resolved(install_root)
     if adb_ok and scrcpy_ok:
         _log(result, "vendor tools already present; skipping download")

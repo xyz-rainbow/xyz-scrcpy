@@ -1,0 +1,5 @@
+Bundled third-party binaries for XYZ-scrcpy
+----------------------------------------
+- Android platform-tools (adb): Apache License 2.0
+- Screen mirroring client v3.3.4: Apache License 2.0
+Install staging may also use system packages (apt/winget/brew) when download is unavailable.
