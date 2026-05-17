@@ -122,11 +122,14 @@ def run_checks() -> bool:
     py = sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
     files = [
         REPO_DIR / "install_xyz.py",
+        REPO_DIR / "vendor_bootstrap.py",
+        REPO_DIR / "adb_resolve.py",
         BIN_DIR / "menu.py",
         BIN_DIR / "config_loader.py",
         BIN_DIR / "monitor.py",
         BIN_DIR / "check_and_repair.py",
         BIN_DIR / "launch_with_checks.py",
+        BIN_DIR / "terminal_open.py",
     ]
     for f in files:
         if f.is_file() and not run_step([py, "-m", "py_compile", str(f)]):

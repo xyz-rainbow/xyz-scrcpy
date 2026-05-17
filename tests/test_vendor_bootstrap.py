@@ -19,6 +19,16 @@ class VendorBootstrapTests(unittest.TestCase):
         with patch("shutil.which", return_value=None):
             self.assertFalse(vb._has_passwordless_sudo())
 
+    def test_scrcpy_vendor_download_url_macos_intel(self):
+        env = vb.EnvInfo("darwin", "x86_64", "brew", False)
+        url = vb.scrcpy_vendor_download_url(env)
+        self.assertIn("macos-x86_64", url or "")
+
+    def test_scrcpy_vendor_download_url_macos_arm(self):
+        env = vb.EnvInfo("darwin", "arm64", "brew", False)
+        url = vb.scrcpy_vendor_download_url(env)
+        self.assertIn("macos-aarch64", url or "")
+
     def test_detect_environment_linux_apt(self):
         def which(name):
             if name == "apt-get":

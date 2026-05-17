@@ -35,9 +35,13 @@ URL_SCRCPY_LINUX_AARCH64 = (
     f"https://github.com/Genymobile/scrcpy/releases/download/v{SCRCPY_VERSION}/"
     f"scrcpy-linux-aarch64-v{SCRCPY_VERSION}.tar.gz"
 )
-URL_SCRCPY_MACOS = (
+URL_SCRCPY_MACOS_AARCH64 = (
     f"https://github.com/Genymobile/scrcpy/releases/download/v{SCRCPY_VERSION}/"
     f"scrcpy-macos-aarch64-v{SCRCPY_VERSION}.tar.gz"
+)
+URL_SCRCPY_MACOS_X86_64 = (
+    f"https://github.com/Genymobile/scrcpy/releases/download/v{SCRCPY_VERSION}/"
+    f"scrcpy-macos-x86_64-v{SCRCPY_VERSION}.tar.gz"
 )
 URL_SCRCPY_WINDOWS_ZIP = (
     f"https://github.com/Genymobile/scrcpy/releases/download/v{SCRCPY_VERSION}/"
@@ -139,6 +143,23 @@ def detect_environment() -> EnvInfo:
         pm = "brew"
     has_sudo = _has_passwordless_sudo()
     return EnvInfo(os_name=os_name, machine=machine, package_manager=pm, has_sudo=has_sudo)
+
+
+def scrcpy_vendor_download_url(env: EnvInfo) -> str | None:
+    """Pinned scrcpy archive URL for the host OS/CPU, or None if unsupported."""
+    if env.os_name == "linux":
+        if env.machine in ("aarch64", "arm64"):
+            return URL_SCRCPY_LINUX_AARCH64
+        if env.machine in ("x86_64", "amd64"):
+            return URL_SCRCPY_LINUX_X86_64
+        return None
+    if env.os_name == "darwin":
+        if env.machine in ("aarch64", "arm64"):
+            return URL_SCRCPY_MACOS_AARCH64
+        if env.machine in ("x86_64", "amd64"):
+            return URL_SCRCPY_MACOS_X86_64
+        return None
+    return None
 
 
 def _has_passwordless_sudo() -> bool:
@@ -330,8 +351,8 @@ def stage_vendor_download(install_root: Path, env: EnvInfo, result: ToolInstallR
                 else:
                     _log(result, "adb download failed (network or disk)", warn=True)
             if not scrcpy_ok:
-                arch_url = URL_SCRCPY_LINUX_AARCH64 if env.machine in ("aarch64", "arm64") else URL_SCRCPY_LINUX_X86_64
-                if env.machine not in ("x86_64", "amd64", "aarch64", "arm64"):
+                arch_url = scrcpy_vendor_download_url(env)
+                if not arch_url:
                     _log(result, f"unsupported CPU {env.machine} for bundled screen-mirror download", warn=True)
                 else:
                     tar_path = tmp_dir / "scrcpy.tar.gz"
@@ -352,16 +373,26 @@ def stage_vendor_download(install_root: Path, env: EnvInfo, result: ToolInstallR
                 if _download_file(URL_PLATFORM_TOOLS_DARWIN, zip_path):
                     if _extract_platform_tools_zip(zip_path, vendor, result):
                         result.adb_source = "vendor"
+                        _log(result, "adb installed to vendor/")
+                    else:
+                        _log(result, "adb vendor extract failed", warn=True)
                 else:
-                    _log(result, "adb download failed", warn=True)
+                    _log(result, "adb download failed (network or disk)", warn=True)
             if not scrcpy_ok:
-                tar_path = tmp_dir / "scrcpy.tar.gz"
-                _log(result, f"Downloading screen-mirror tool v{SCRCPY_VERSION}...")
-                if _download_file(URL_SCRCPY_MACOS, tar_path):
-                    if _extract_scrcpy_tar(tar_path, vendor, result):
-                        result.scrcpy_source = "vendor"
+                arch_url = scrcpy_vendor_download_url(env)
+                if not arch_url:
+                    _log(result, f"unsupported CPU {env.machine} for bundled screen-mirror download", warn=True)
                 else:
-                    _log(result, "scrcpy download failed", warn=True)
+                    tar_path = tmp_dir / "scrcpy.tar.gz"
+                    _log(result, f"Downloading screen-mirror tool v{SCRCPY_VERSION}...")
+                    if _download_file(arch_url, tar_path):
+                        if _extract_scrcpy_tar(tar_path, vendor, result):
+                            result.scrcpy_source = "vendor"
+                            _log(result, "scrcpy installed to vendor/")
+                        else:
+                            _log(result, "scrcpy vendor extract failed", warn=True)
+                    else:
+                        _log(result, "scrcpy download failed (network or disk)", warn=True)
 
         elif env.os_name == "windows":
             zip_path = tmp_dir / "scrcpy-win.zip"

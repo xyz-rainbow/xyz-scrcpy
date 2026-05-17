@@ -392,6 +392,8 @@ def adb_export_apk_to_dir(serial, package_name, destination_dir):
 
 
 def adb_try_backup(serial, package_name, destination_dir):
+    if not adb_is_available():
+        return False, "", "adb not available.", 1
     destination_dir.mkdir(parents=True, exist_ok=True)
     backup_file = destination_dir / f"{package_name}.ab"
     return run_command(
