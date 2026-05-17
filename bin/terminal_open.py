@@ -22,6 +22,17 @@ class TerminalOpenResult:
     tried: list[str] = field(default_factory=list)
 
 
+def launcher_geometry() -> str:
+    """Default size for the interactive menu (wide enough for the TUI, not the 40x18 monitor popup)."""
+    try:
+        size = shutil.get_terminal_size(fallback=(100, 28))
+        cols = min(max(size.columns, 80), 132)
+        rows = min(max(size.lines, 24), 42)
+        return f"{cols}x{rows}"
+    except OSError:
+        return "100x28"
+
+
 def is_wsl() -> bool:
     if os.environ.get("WSL_DISTRO_NAME"):
         return True
@@ -126,14 +137,16 @@ def open_command_in_terminal(
     *,
     argv: Sequence[str],
     cwd: Path,
-    geometry: str = "40x18",
-    title: str = "XYZ Launcher",
+    geometry: str | None = None,
+    title: str = "XYZ-scrcpy",
     env: Mapping[str, str] | None = None,
     hide_menubar: bool = False,
 ) -> TerminalOpenResult:
     """Spawn argv in a new terminal window when possible."""
     if not argv:
         return TerminalOpenResult(ok=False, reason="empty_argv", tried=[])
+    if geometry is None:
+        geometry = launcher_geometry()
 
     system = platform.system()
     run_env = _merge_env(None, env)

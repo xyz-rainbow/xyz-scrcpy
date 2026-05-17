@@ -17,6 +17,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import vendor_bootstrap as vb
 import win_path_shim as wps
 import adb_resolve
 
@@ -319,7 +320,9 @@ def verify_linux_psutil(install_dir: Path, os_name: str) -> None:
 def write_launcher(os_name: str, launcher: Path, install_dir: Path) -> None:
     launcher.parent.mkdir(parents=True, exist_ok=True)
     if os_name in ("linux", "darwin"):
+        vendor_path = vb.vendor_dir(install_dir).resolve()
         content = f"""#!/usr/bin/env bash
+export PATH="{vendor_path}:$PATH"
 bash "{install_dir / 'bin' / 'launch_with_checks.sh'}"
 """
     else:
@@ -369,7 +372,9 @@ def linux_service_content(install_dir: Path) -> str:
     log_path = install_dir / "config" / "scrcpy.log"
     display = os.environ.get("DISPLAY", ":0")
     session_type = os.environ.get("XDG_SESSION_TYPE", "")
-    env_lines = f"Environment=DISPLAY={display}\n"
+    vendor_path = vb.vendor_dir(install_dir).resolve()
+    path_val = f"{vendor_path}:/usr/local/bin:/usr/bin:/bin"
+    env_lines = f"Environment=PATH={path_val}\nEnvironment=DISPLAY={display}\n"
     if session_type:
         env_lines += f"Environment=XDG_SESSION_TYPE={session_type}\n"
     return f"""[Unit]
@@ -549,24 +554,37 @@ def uninstall_service(
         service_file.unlink()
 
 
-def check_dependencies(os_name: str, *, verbose: bool = False, project_root: Path | None = None) -> None:
-    required = ["adb", "scrcpy"]
-    required.insert(0, "python" if os_name == "windows" else "python3")
+def check_dependencies(
+    os_name: str,
+    *,
+    verbose: bool = False,
+    project_root: Path | None = None,
+    install_root: Path | None = None,
+) -> None:
+    root = install_root or project_root
+    required = ["python" if os_name == "windows" else "python3"]
     missing = []
     for dep in required:
-        if dep == "adb" and project_root is not None:
-            if adb_resolve.resolve_adb_executable(project_root)[1] != "not_found":
-                continue
-        if shutil.which(dep) is None:
+        if shutil.which(dep) is None and dep not in missing:
             missing.append(dep)
+    if root is not None:
+        adb_ok, scrcpy_ok = vb.verify_tools_resolved(root)
+        if not adb_ok:
+            missing.append("adb")
+        if not scrcpy_ok:
+            missing.append("scrcpy")
+    else:
+        for dep in ("adb", "scrcpy"):
+            if shutil.which(dep) is None:
+                missing.append(dep)
     if missing:
         msg = f"Warning: Missing dependencies: {', '.join(missing)}"
         print(msg)
         if verbose:
             logging.getLogger("xyz_install").info(msg)
-        print("Installation will continue, but runtime may fail until dependencies are installed.")
+        print("Installation will continue; installer will try to provision tools automatically.")
         if os_name == "linux" and any(d in missing for d in ("adb", "scrcpy")):
-            print("Debian/Ubuntu hint: sudo apt install adb scrcpy")
+            print("Debian/Ubuntu hint (manual fallback): sudo apt install adb scrcpy")
     if os_name == "linux" and shutil.which("pactl") is None:
         print("Notice: 'pactl' not found. Microphone Bus feature (xyz-mic-input) will fallback gracefully.")
     if os_name == "linux":
@@ -629,13 +647,17 @@ def open_initial_menu(
     install_dir: Path,
     prechecked_status: str | None = None,
 ) -> TerminalOpenResult:
-    launcher_py = install_dir / "bin" / "launch_with_checks.py"
     py = python_for_post_install(install_dir, os_name)
+    status = (prechecked_status or "").upper()
+    if status in ("PASS", "PASS_AFTER_REPAIR"):
+        target = install_dir / "bin" / "menu.py"
+    else:
+        target = install_dir / "bin" / "launch_with_checks.py"
     return terminal_open.open_command_in_terminal(
-        argv=[py, str(launcher_py)],
+        argv=[py, str(target)],
         cwd=install_dir,
-        geometry="40x18",
-        title="XYZ Initial Menu",
+        geometry=terminal_open.launcher_geometry(),
+        title="XYZ-scrcpy",
         env=_launcher_check_env(prechecked_status),
         hide_menubar=(os_name == "linux"),
     )
@@ -646,12 +668,16 @@ def run_menu_inline(
     install_dir: Path,
     prechecked_status: str | None = None,
 ) -> None:
-    launcher_py = install_dir / "bin" / "launch_with_checks.py"
     py = python_for_post_install(install_dir, os_name)
+    status = (prechecked_status or "").upper()
+    if status in ("PASS", "PASS_AFTER_REPAIR"):
+        script = install_dir / "bin" / "menu.py"
+    else:
+        script = install_dir / "bin" / "launch_with_checks.py"
     env = dict(os.environ)
     env.update(_launcher_check_env(prechecked_status))
     env.pop("XYZ_LAUNCHER_WINDOW", None)
-    subprocess.run([py, str(launcher_py)], check=False, cwd=str(install_dir), env=env)
+    subprocess.run([py, str(script)], check=False, cwd=str(install_dir), env=env)
 
 
 def report_initial_menu_result(
@@ -672,7 +698,7 @@ def report_initial_menu_result(
         print(f"[verbose] {line}")
 
     if result.ok:
-        print(f"Mini terminal opened ({result.method}).")
+        print(f"Application window opened ({result.method}).")
         return
 
     print("Could not open a graphical terminal for the initial menu.")
@@ -703,12 +729,13 @@ def do_install(
     verbose: bool = False,
     no_open_terminal: bool = False,
     non_interactive: bool = False,
+    skip_vendor_download: bool = False,
 ) -> None:
     if verbose:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     print(f"Installing to: {paths['install_dir']}")
-    check_dependencies(os_name, verbose=verbose, project_root=src_root)
     install_root = paths["install_dir"]
+    check_dependencies(os_name, verbose=verbose, project_root=src_root, install_root=install_root)
     previous_alias = read_installed_alias(install_root) if install_root.exists() else DEFAULT_ALIAS
     print("Running clean install (removing previous installation first)...")
     do_uninstall(paths, os_name, remove_app_files=True, remove_repo_copy=False, verbose=verbose)
@@ -723,6 +750,20 @@ def do_install(
                 f"linux_runtime method={runtime.method} {runtime.message}",
                 verbose=verbose,
             )
+        tools = vb.ensure_android_tools(
+            paths["install_dir"],
+            os_name,
+            verbose=verbose,
+            skip_vendor_download=skip_vendor_download,
+        )
+        for line in tools.attempts:
+            wps.log_install_line(paths["install_dir"], line, verbose=False)
+        check_dependencies(
+            os_name,
+            verbose=verbose,
+            project_root=src_root,
+            install_root=paths["install_dir"],
+        )
         save_alias_to_config(paths["install_dir"], alias)
         launch_path = launcher_path(os_name, paths["launcher_dir"], alias)
         previous_path = launcher_path(os_name, paths["launcher_dir"], previous_alias)
@@ -909,6 +950,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Do not spawn the post-install mini terminal (CI/headless).",
     )
+    parser.add_argument(
+        "--skip-vendor-download",
+        action="store_true",
+        help="Skip downloading adb/scrcpy into vendor/ (air-gap/CI; package managers still run).",
+    )
     return parser.parse_args()
 
 
@@ -983,6 +1029,7 @@ def main() -> int:
                     verbose=args.verbose,
                     no_open_terminal=args.no_open_terminal,
                     non_interactive=args.yes,
+                    skip_vendor_download=args.skip_vendor_download,
                 )
             else:
                 do_sync_alias(paths, os_name, alias)

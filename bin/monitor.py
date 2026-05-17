@@ -146,7 +146,7 @@ def read_serials_from_adb() -> str:
             timeout=30,
             stderr=subprocess.DEVNULL,
         )
-    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
+    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired, FileNotFoundError):
         return ""
     serials: list[str] = []
     for line in out.splitlines():

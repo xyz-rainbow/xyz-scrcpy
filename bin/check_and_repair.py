@@ -12,6 +12,14 @@ import time
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+try:
+    import vendor_bootstrap as vb
+
+    vb.prepend_vendor_to_path(REPO_DIR)
+except ImportError:
+    pass
 BIN_DIR = REPO_DIR / "bin"
 LOG_FILE = Path(os.environ.get("XYZ_CHECK_LOG_FILE", REPO_DIR / "config" / "check.log"))
 TIMEOUT = int(os.environ.get("XYZ_CHECK_TIMEOUT_SECONDS", "90"))

@@ -24,6 +24,18 @@ Interactive Android device launcher and monitor on top of `scrcpy`, built for us
 - Windows: **`uv`** recommended to create `.venv` under the install directory during `install_xyz.py`; monitor runs via Task Scheduler.
 - Bundled upstream `scrcpy` in `vendor/` is aligned to latest stable tag `v3.3.4` and is preferred at runtime (fallback: system `scrcpy` in `PATH`)
 
+## Bundled adb and scrcpy (install pipeline)
+
+`install_xyz.py` provisions **adb** and **scrcpy** without aborting the install if a step fails:
+
+1. **Vendor download** — pinned platform-tools and screen-mirror client **v3.3.4** into `{install_dir}/vendor/` (see `vendor/NOTICE` for licenses).
+2. **Package manager** — `apt` / `dnf` / `winget` / `brew` when stage 1 did not complete both tools.
+3. **Manual recovery** — console hints plus full attempt log in `config/install.log`.
+
+Flags: `--skip-vendor-download` (air-gap/CI), `--verbose` (more detail). Launchers and the Linux user unit prepend `vendor/` to `PATH` so `xyz-scrcpy` finds bundled binaries first.
+
+Dev clone: `./installer.sh` → **[1]** runs the same pipeline via `setup_vendor.py` → `vendor_bootstrap`.
+
 ## Vendor directory and release packaging (Option A)
 
 - **Development clone** may contain a full `vendor/` tree (including Windows `.exe` / DLLs) for convenience on a single checkout.
@@ -128,7 +140,8 @@ python3 install_xyz.py --action install --yes --no-open-terminal
 |---------|------------|
 | Install prints *Opening initial mini terminal…* but no window appears | Install a terminal emulator (`sudo apt install gnome-terminal` on Debian/Ubuntu) or run `xyz-scrcpy` manually in your current shell. The installer lists emulators it tried. |
 | `No module named pip` during install | Install `python3-venv` and `python3-pip`, or install [uv](https://github.com/astral-sh/uv) so the installer can create `~/.local/share/xyz-scrcpy/.venv`. |
-| `Missing dependencies: adb, scrcpy` | `sudo apt install adb scrcpy` (Linux) or add platform-tools / scrcpy to PATH (Windows). |
+| `Missing dependencies: adb, scrcpy` | Re-run install with network, or `sudo apt install adb scrcpy` (Linux). See `config/install.log` for staged attempts (vendor download → package manager → manual). |
+| `FileNotFoundError: adb` in menu | Reinstall or place `adb` in `vendor/`; launchers prepend `vendor/` to `PATH`. |
 | Monitor service does not start | `systemctl --user status scrcpy-auto.service` — user systemd must be available (not all SSH/WSL setups). Install still completes with a warning. |
 | Fail-open / check errors on Linux | Ensure unit tests pass (`python3 -m unittest discover -s tests`). Windows-only registry tests must not import `winreg` on Linux (fixed in `win_path_shim.py`). |
 

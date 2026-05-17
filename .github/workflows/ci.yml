@@ -24,7 +24,7 @@ jobs:
       - name: Syntax check (Python)
         run: >
           python -m py_compile
-          install_xyz.py win_path_shim.py adb_resolve.py repair_xyz.py
+          install_xyz.py vendor_bootstrap.py win_path_shim.py adb_resolve.py repair_xyz.py
           bin/menu.py bin/config_loader.py bin/monitor.py
           bin/check_and_repair.py bin/launch_with_checks.py bin/install_tui.py
           bin/terminal_open.py
@@ -42,5 +42,25 @@ jobs:
           HOME: ${{ runner.temp }}/xyz-scrcpy-home
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          python3 install_xyz.py --action install --yes --no-open-terminal
+          python3 install_xyz.py --action install --yes --no-open-terminal --skip-vendor-download
           test -x "$HOME/.local/bin/xyz-scrcpy"
+
+  vendor-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Vendor download smoke
+        run: |
+          python3 -c "
+          from pathlib import Path
+          import vendor_bootstrap as vb
+          r = vb.ensure_android_tools(Path('.'), 'linux', verbose=True)
+          assert r.adb_ok, r.attempts
+          assert r.scrcpy_ok, r.attempts
+          "
+          ./vendor/adb version
+          ./vendor/scrcpy --version

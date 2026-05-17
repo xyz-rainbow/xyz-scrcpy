@@ -173,9 +173,9 @@ if not exist ".venv" (
 echo [bootstrap] Installing Python dependencies...
 uv pip install -r .requirements.txt
 if errorlevel 1 exit /b 1
-echo [bootstrap] Running setup_vendor.py...
+echo [bootstrap] Installing adb/scrcpy into vendor/ (network)...
 ".venv\Scripts\python.exe" setup_vendor.py
-if errorlevel 1 exit /b 1
+if errorlevel 1 echo [WARN] vendor tools incomplete; install may continue with system adb/scrcpy.
 echo [bootstrap] Done.
 exit /b 0
 

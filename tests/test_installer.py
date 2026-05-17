@@ -22,6 +22,29 @@ class InstallerTests(unittest.TestCase):
         launcher = install_xyz.launcher_path("windows", Path("C:/bin"), "abc")
         self.assertTrue(str(launcher).endswith("abc.cmd"))
 
+    def test_linux_launcher_includes_vendor_in_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            install_dir = Path(td) / "app"
+            install_dir.mkdir(parents=True)
+            (install_dir / "bin").mkdir()
+            (install_dir / "bin" / "launch_with_checks.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            launcher = Path(td) / "bin" / "xyz-scrcpy"
+            launcher.parent.mkdir()
+            install_xyz.write_launcher("linux", launcher, install_dir)
+            text = launcher.read_text(encoding="utf-8")
+            self.assertIn("/vendor", text)
+            self.assertIn("export PATH=", text)
+
+    def test_linux_service_unit_includes_vendor_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            install_dir = Path(td) / "app"
+            install_dir.mkdir(parents=True)
+            (install_dir / "bin").mkdir()
+            (install_dir / "bin" / "monitor.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            unit = install_xyz.linux_service_content(install_dir)
+            self.assertIn("Environment=PATH=", unit)
+            self.assertIn("/vendor", unit)
+
     def test_alias_saved_and_loaded(self):
         with tempfile.TemporaryDirectory() as td:
             install_dir = Path(td)
@@ -80,6 +103,7 @@ class InstallerTests(unittest.TestCase):
                 patch("install_xyz.save_alias_to_config"),
                 patch("install_xyz.ensure_windows_runtime_venv"),
                 patch("install_xyz.ensure_linux_runtime", return_value=install_xyz.RuntimeStatus("venv_ok")),
+                patch("install_xyz.vb.ensure_android_tools", return_value=install_xyz.vb.ToolInstallResult()),
             ):
                 with redirect_stdout(StringIO()):
                     install_xyz.do_install(paths, src, "linux", "xyz-scrcpy", True, False)

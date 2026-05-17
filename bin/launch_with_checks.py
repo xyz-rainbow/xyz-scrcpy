@@ -15,6 +15,14 @@ from pathlib import Path
 
 BIN_DIR = Path(__file__).resolve().parent
 REPO_DIR = BIN_DIR.parent
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+try:
+    import vendor_bootstrap as vb
+
+    vb.prepend_vendor_to_path(REPO_DIR)
+except ImportError:
+    vb = None  # type: ignore[assignment]
 CHECK_PY = BIN_DIR / "check_and_repair.py"
 MENU_SCRIPT = BIN_DIR / "menu.py"
 LOG_FILE = REPO_DIR / "config" / "check.log"
@@ -27,12 +35,21 @@ def _py() -> str:
     return sys.executable or "python3"
 
 
-def open_detached_menu_terminal() -> bool:
+def _should_spawn_detached_gui_terminal() -> bool:
+    """Spawn a new GUI terminal only when not already inside one and stdin is not interactive."""
     if os.environ.get("XYZ_LAUNCHER_WINDOW") == "1":
         return False
     if os.environ.get("XYZ_SKIP_MENU_EXEC") == "1":
         return False
     if platform.system() != "Linux":
+        return False
+    if sys.stdin.isatty():
+        return False
+    return True
+
+
+def open_detached_menu_terminal() -> bool:
+    if not _should_spawn_detached_gui_terminal():
         return False
     import terminal_open
 
@@ -41,12 +58,15 @@ def open_detached_menu_terminal() -> bool:
     result = terminal_open.open_command_in_terminal(
         argv=[_py(), script],
         cwd=REPO_DIR,
-        geometry="40x18",
-        title="XYZ Launcher",
+        title="XYZ-scrcpy",
         env=env,
         hide_menubar=True,
     )
     return result.ok
+
+
+def _exec_menu() -> None:
+    os.execv(_py(), [_py(), str(MENU_SCRIPT)])
 
 
 def start_background_full_checks() -> None:
@@ -83,10 +103,18 @@ def _issue_body() -> str:
 
     os_info = plat.platform()
     scrcpy_info = "scrcpy unknown"
+    scrcpy_bin = "scrcpy"
+    if vb is not None:
+        scrcpy_bin, _src = vb.resolve_scrcpy_executable(REPO_DIR)
     try:
-        out = subprocess.check_output(["scrcpy", "--version"], text=True, stderr=subprocess.STDOUT, timeout=5)
+        out = subprocess.check_output(
+            [scrcpy_bin, "--version"],
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        )
         scrcpy_info = (out or "").splitlines()[0].strip() if out else scrcpy_info
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, FileNotFoundError):
         pass
     log_snippet = crash_snippet = timing_snippet = ""
     if LOG_FILE.is_file():
@@ -143,46 +171,61 @@ def main() -> int:
     if open_detached_menu_terminal():
         return 0
 
-    if os.environ.get("XYZ_CHECKS_ALREADY_DONE") == "1":
-        status = os.environ.get("XYZ_CHECKS_STATUS", "PASS")
+    in_installer_window = os.environ.get("XYZ_LAUNCHER_WINDOW") == "1"
+    checks_done = os.environ.get("XYZ_CHECKS_ALREADY_DONE") == "1"
+    status = os.environ.get("XYZ_CHECKS_STATUS", "")
+
+    if checks_done and status in ("PASS", "PASS_AFTER_REPAIR"):
+        if in_installer_window:
+            _exec_menu()
+        start_background_full_checks()
+        if not in_installer_window and FULL_LOG_FILE.is_file():
+            print(f"[INFO] Full test suite is running in background: {FULL_LOG_FILE}")
+        elif not in_installer_window:
+            print("[INFO] Full test suite started in background.")
+    elif checks_done:
+        status = status or "UNKNOWN"
         print(f"[INFO] Reusing installer check result: {status}")
     else:
         print("[INFO] Running quick syntax checks...")
         status = run_quick_checks()
 
-    if status in ("PASS", "PASS_AFTER_REPAIR"):
-        start_background_full_checks()
-        if FULL_LOG_FILE.is_file():
-            print(f"[INFO] Full test suite is running in background: {FULL_LOG_FILE}")
+    if not (checks_done and status in ("PASS", "PASS_AFTER_REPAIR")):
+        if status in ("PASS", "PASS_AFTER_REPAIR"):
+            start_background_full_checks()
+            if FULL_LOG_FILE.is_file():
+                print(f"[INFO] Full test suite is running in background: {FULL_LOG_FILE}")
+            else:
+                print("[INFO] Full test suite started in background.")
+        elif status == "FAIL_OPEN":
+            print("[WARNING] Automated checks are still failing.")
+            print("[WARNING] Fail-open mode is available.")
+            print("[WARNING] Please report with logs: https://github.com/xyz-rainbow/xyz-scrcpy/issues")
+            print(
+                "[WARNING] GitHub issue creation requires login; or email log to "
+                "rainbow@rainbowtechnology.xyz"
+            )
+            open_issue = input("Open prefilled GitHub issue page now? (Y/n): ").strip().lower()
+            if not open_issue or open_issue in ("y", "yes"):
+                open_prefilled_issue()
+            open_anyway = input("Open menu anyway despite errors? (Y/n): ").strip().lower()
+            if open_anyway and open_anyway not in ("y", "yes"):
+                print("[INFO] Menu launch cancelled by user.")
+                return 1
         else:
-            print("[INFO] Full test suite started in background.")
-    elif status == "FAIL_OPEN":
-        print("[WARNING] Automated checks are still failing.")
-        print("[WARNING] Fail-open mode is available.")
-        print("[WARNING] Please report with logs: https://github.com/xyz-rainbow/xyz-scrcpy/issues")
-        print(
-            "[WARNING] GitHub issue creation requires login; or email log to "
-            "rainbow@rainbowtechnology.xyz"
-        )
-        open_issue = input("Open prefilled GitHub issue page now? (Y/n): ").strip().lower()
-        if not open_issue or open_issue in ("y", "yes"):
-            open_prefilled_issue()
-        open_anyway = input("Open menu anyway despite errors? (Y/n): ").strip().lower()
-        if open_anyway and open_anyway not in ("y", "yes"):
-            print("[INFO] Menu launch cancelled by user.")
-            return 1
-    else:
-        print(f"[WARNING] Unknown check status: {status}")
+            print(f"[WARNING] Unknown check status: {status}")
 
-    if LOG_FILE.is_file():
+    if LOG_FILE.is_file() and not in_installer_window:
         print("[INFO] Check log: ./config/check.log")
 
     if os.environ.get("XYZ_SKIP_MENU_EXEC") == "1":
         print("[INFO] Test mode: menu execution skipped.")
         return 0
 
-    print("[INFO] Launching interactive menu...")
-    os.execv(_py(), [_py(), str(MENU_SCRIPT)])
+    if not in_installer_window:
+        print("[INFO] Launching interactive menu...")
+    _exec_menu()
+    return 0
 
 
 if __name__ == "__main__":

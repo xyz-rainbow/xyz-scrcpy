@@ -49,6 +49,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 import adb_resolve  # noqa: E402
 
+try:
+    import vendor_bootstrap as vb  # noqa: E402
+
+    vb.prepend_vendor_to_path(ROOT_DIR)
+except ImportError:
+    vb = None  # type: ignore[assignment]
+
 import tempfile
 LOCK_PATH = os.path.join(tempfile.gettempdir(), "xyz_menu.lock")
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
@@ -62,6 +69,18 @@ ESCAPE_READ_TIMEOUT = 0.03
 
 def _adb_exe() -> str:
     return adb_resolve.resolve_adb_executable(ROOT_DIR)[0]
+
+
+def adb_is_available() -> bool:
+    return adb_resolve.resolve_adb_executable(ROOT_DIR)[1] != "not_found"
+
+
+def scrcpy_is_available() -> bool:
+    if vb is not None:
+        return vb.resolve_scrcpy_executable(ROOT_DIR)[1] != "not_found"
+    if SCRCPY_VENDOR_BIN.is_file() and os.access(SCRCPY_VENDOR_BIN, os.X_OK):
+        return True
+    return shutil.which("scrcpy") is not None
 
 
 def get_key():
@@ -96,9 +115,9 @@ def get_key():
             if ch2 == b'K': return "\x1b[D"
         if ch == b'\r': return "\r"
         try:
-            return ch.decode('utf-8')
-        except:
-            return ch.decode('latin-1')
+            return ch.decode("utf-8")
+        except (UnicodeDecodeError, LookupError):
+            return ch.decode("latin-1")
 
 
 def visible_len(text):
@@ -422,23 +441,30 @@ def normalize_audio_preferences(cfg):
 
 
 def list_devices():
+    if not adb_is_available():
+        return []
     try:
         adb = _adb_exe()
-        raw = subprocess.check_output([adb, "devices"], text=True).splitlines()
+        raw = subprocess.check_output([adb, "devices"], text=True, timeout=30).splitlines()
         serials = [line.split()[0] for line in raw if line.strip().endswith("device") and not line.startswith("List")]
         devices = []
         for serial in serials:
             model = subprocess.check_output(
                 [adb, "-s", serial, "shell", "getprop", "ro.product.model"],
                 text=True,
+                timeout=15,
             ).strip()
             devices.append({"serial": serial, "label": f"{model} ({serial})"})
         return devices
-    except subprocess.SubprocessError:
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
         return []
 
 
 def resolve_scrcpy_binary():
+    if vb is not None:
+        exe, src = vb.resolve_scrcpy_executable(ROOT_DIR)
+        if src != "not_found":
+            return exe
     if SCRCPY_VENDOR_BIN.exists() and os.access(SCRCPY_VENDOR_BIN, os.X_OK):
         return str(SCRCPY_VENDOR_BIN)
     return "scrcpy"
@@ -615,7 +641,9 @@ def kill_scrcpy_for_serial(serial: str) -> None:
                 pass
 
 
-def launch_scrcpy(serial, cfg):
+def launch_scrcpy(serial, cfg) -> bool:
+    if not scrcpy_is_available():
+        return False
     cfg = normalize_audio_preferences(cfg)
     audio_target = str(cfg.get("audio_target", "host")).lower()
     active_recall = bool(cfg.get("active_recall", False))
@@ -630,7 +658,16 @@ def launch_scrcpy(serial, cfg):
         else:
             print("[WARN] Microphone is not supported by current scrcpy version.")
     ensure_microphone_bus(microphone_bus)
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=dict(os.environ))
+    try:
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=dict(os.environ),
+        )
+    except OSError:
+        return False
+    return True
 
 
 def render_menu(opts, idx, width, banner=None):
@@ -847,14 +884,19 @@ def device_submenu(device, cfg, banner=None):
 
         if selected == "Screen Share":
             updated_cfg = normalize_audio_preferences(updated_cfg)
-            launch_scrcpy(serial, updated_cfg)
-            updated_cfg["applied_audio_target"] = updated_cfg.get("audio_target", "host")
-            updated_cfg["applied_active_recall"] = bool(updated_cfg.get("active_recall", False))
-            updated_cfg["applied_microphone_bus"] = bool(updated_cfg.get("microphone_bus", False))
-            updated_cfg["last_device_serial"] = serial
-            save_config(updated_cfg)
-            updated_cfg = load_config()
-            local_banner = make_banner("OK", f"Screen Share started for {serial}.")
+            if launch_scrcpy(serial, updated_cfg):
+                updated_cfg["applied_audio_target"] = updated_cfg.get("audio_target", "host")
+                updated_cfg["applied_active_recall"] = bool(updated_cfg.get("active_recall", False))
+                updated_cfg["applied_microphone_bus"] = bool(updated_cfg.get("microphone_bus", False))
+                updated_cfg["last_device_serial"] = serial
+                save_config(updated_cfg)
+                updated_cfg = load_config()
+                local_banner = make_banner("OK", f"Screen Share started for {serial}.")
+            else:
+                local_banner = make_banner(
+                    "ERROR",
+                    "scrcpy not found. Re-run install or place scrcpy in vendor/.",
+                )
             continue
 
         if selected == "Disconnect":
@@ -1078,6 +1120,12 @@ def main():
     idx = 0
     cfg = load_config()
     banner = None
+    if not adb_is_available():
+        banner = make_banner(
+            "WARN",
+            "adb not found. Re-run install or place platform-tools in vendor/. "
+            "Debian: sudo apt install adb scrcpy",
+        )
     try:
         while True:
             width = terminal_width()
@@ -1120,14 +1168,16 @@ def main():
                         cfg = normalize_audio_preferences(cfg)
                         kill_scrcpy_for_serial(target_serial)
                         time.sleep(0.4)
-                        launch_scrcpy(target_serial, cfg)
-                        cfg["applied_audio_target"] = cfg.get("audio_target", "host")
-                        cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))
-                        cfg["applied_microphone_bus"] = bool(cfg.get("microphone_bus", False))
-                        cfg["last_device_serial"] = target_serial
-                        save_config(cfg)
-                        cfg = load_config()
-                        banner = make_banner("OK", f"Restarted screen share for {target_serial}.")
+                        if launch_scrcpy(target_serial, cfg):
+                            cfg["applied_audio_target"] = cfg.get("audio_target", "host")
+                            cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))
+                            cfg["applied_microphone_bus"] = bool(cfg.get("microphone_bus", False))
+                            cfg["last_device_serial"] = target_serial
+                            save_config(cfg)
+                            cfg = load_config()
+                            banner = make_banner("OK", f"Restarted screen share for {target_serial}.")
+                        else:
+                            banner = make_banner("ERROR", "scrcpy not found; cannot restart screen share.")
                     else:
                         banner = make_banner("WARN", "No target device available to restart.")
                     continue
@@ -1146,7 +1196,7 @@ def main():
         if os.path.exists(LOCK_PATH):
             try:
                 lock_file.close()
-            except:
+            except OSError:
                 pass
             try:
                 os.remove(LOCK_PATH)

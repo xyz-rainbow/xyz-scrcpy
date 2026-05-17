@@ -112,9 +112,9 @@ do_bootstrap() {
   if ! uv pip install -r .requirements.txt; then
     return 1
   fi
-  echo "[bootstrap] Running setup_vendor.py..."
+  echo "[bootstrap] Installing adb/scrcpy into vendor/ (network)..."
   if ! "${PYTHON_VENV}" setup_vendor.py; then
-    return 1
+    echo "[WARN] vendor tools incomplete; install may continue with system adb/scrcpy."
   fi
   echo "[bootstrap] Done."
   return 0
@@ -156,7 +156,7 @@ read_menu_choice() {
 }
 
 opt_refresh() {
-  confirm_yes_no "Update or create .venv, run uv pip install, and setup_vendor (uses network)"
+  confirm_yes_no "Update or create .venv, pip deps, and vendor adb/scrcpy (uses network)"
   if [[ "${CONFIRM}" == "0" ]]; then
     return
   fi
