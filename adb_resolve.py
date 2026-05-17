@@ -26,6 +26,17 @@ def _vendor_adb(repo_root: Path) -> Path:
     return repo_root / "vendor" / ("adb.exe" if os.name == "nt" else "adb")
 
 
+def _prepend_vendor_to_path(repo_root: Path) -> None:
+    """Prefer bundled adb when repo_root/vendor exists."""
+    vend = repo_root / "vendor"
+    if not vend.is_dir():
+        return
+    prefix = str(vend.resolve())
+    path = os.environ.get("PATH", "")
+    if prefix not in path.split(os.pathsep):
+        os.environ["PATH"] = prefix + os.pathsep + path
+
+
 def _platform_tools_candidates(repo_root: Path) -> list[tuple[Path, str]]:
     """Return (path_to_adb_binary, source_label) candidates in priority order (excluding PATH)."""
     out: list[tuple[Path, str]] = []
@@ -64,6 +75,7 @@ def resolve_adb_executable(repo_root: Path) -> tuple[str, str]:
     ``executable`` is an absolute path when resolved; otherwise the literal ``"adb"`` with
     ``source_tag == "not_found"`` (callers should expect subprocess failures).
     """
+    _prepend_vendor_to_path(repo_root)
     w = shutil.which("adb")
     if w:
         return (w, "PATH")

@@ -15,6 +15,10 @@ import vendor_bootstrap as vb  # noqa: E402
 
 
 class VendorBootstrapTests(unittest.TestCase):
+    def test_has_passwordless_sudo_false_without_sudo(self):
+        with patch("shutil.which", return_value=None):
+            self.assertFalse(vb._has_passwordless_sudo())
+
     def test_detect_environment_linux_apt(self):
         def which(name):
             if name == "apt-get":

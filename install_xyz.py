@@ -735,7 +735,6 @@ def do_install(
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     print(f"Installing to: {paths['install_dir']}")
     install_root = paths["install_dir"]
-    check_dependencies(os_name, verbose=verbose, project_root=src_root, install_root=install_root)
     previous_alias = read_installed_alias(install_root) if install_root.exists() else DEFAULT_ALIAS
     print("Running clean install (removing previous installation first)...")
     do_uninstall(paths, os_name, remove_app_files=True, remove_repo_copy=False, verbose=verbose)
@@ -743,11 +742,11 @@ def do_install(
         copy_project(src_root, paths["install_dir"])
         if os_name == "windows":
             ensure_windows_runtime_venv(paths["install_dir"])
-        elif os_name == "linux":
+        elif os_name in ("linux", "darwin"):
             runtime = ensure_linux_runtime(paths["install_dir"], verbose=verbose)
             wps.log_install_line(
                 paths["install_dir"],
-                f"linux_runtime method={runtime.method} {runtime.message}",
+                f"unix_runtime method={runtime.method} {runtime.message}",
                 verbose=verbose,
             )
         tools = vb.ensure_android_tools(
@@ -790,6 +789,12 @@ def do_install(
         raise
     print("Install completed.")
     print(f"Launcher: {launch_path}")
+    if os_name in ("linux", "darwin"):
+        launcher_bin = str(paths["launcher_dir"].resolve())
+        if not launch_path.is_file():
+            print(f"[WARN] Launcher file missing at {launch_path}")
+        elif launcher_bin not in os.environ.get("PATH", "").split(os.pathsep):
+            print(f'Tip: export PATH="{launcher_bin}:$PATH"  (or open a new login shell), then run: {alias}')
     verify_linux_psutil(paths["install_dir"], os_name)
     if os_name == "linux" and enable_service:
         print("Linux: user unit installed/enabled — start or check with: systemctl --user start scrcpy-auto.service")

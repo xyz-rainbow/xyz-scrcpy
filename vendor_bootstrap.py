@@ -137,8 +137,23 @@ def detect_environment() -> EnvInfo:
         pm = "winget"
     elif os_name == "darwin" and shutil.which("brew"):
         pm = "brew"
-    has_sudo = bool(shutil.which("sudo"))
+    has_sudo = _has_passwordless_sudo()
     return EnvInfo(os_name=os_name, machine=machine, package_manager=pm, has_sudo=has_sudo)
+
+
+def _has_passwordless_sudo() -> bool:
+    if not shutil.which("sudo"):
+        return False
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        return proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _log(result: ToolInstallResult, msg: str, *, warn: bool = False) -> None:
@@ -399,40 +414,36 @@ def stage_package_managers(install_root: Path, env: EnvInfo, result: ToolInstall
             _log(result, "sudo not available; skipping apt install", warn=True)
             return
         if not adb_ok:
-            if _run_command(
+            _run_command(
                 ["sudo", "-n", "apt-get", "install", "-y", "adb"],
                 result,
                 "apt adb",
-            ):
-                result.adb_source = "apt"
+            )
         if not scrcpy_ok:
-            if _run_command(
+            _run_command(
                 ["sudo", "-n", "apt-get", "install", "-y", "scrcpy"],
                 result,
                 "apt scrcpy",
-            ):
-                result.scrcpy_source = "apt"
+            )
     elif env.package_manager == "dnf":
         if not env.has_sudo:
             _log(result, "sudo not available; skipping dnf install", warn=True)
             return
         if not adb_ok:
-            if _run_command(
+            _run_command(
                 ["sudo", "-n", "dnf", "install", "-y", "android-tools"],
                 result,
                 "dnf android-tools",
-            ):
-                result.adb_source = "dnf"
+            )
         if not scrcpy_ok:
-            if _run_command(
+            _run_command(
                 ["sudo", "-n", "dnf", "install", "-y", "scrcpy"],
                 result,
                 "dnf scrcpy",
-            ):
-                result.scrcpy_source = "dnf"
+            )
     elif env.package_manager == "winget":
         if not adb_ok:
-            if _run_command(
+            _run_command(
                 [
                     "winget",
                     "install",
@@ -444,10 +455,9 @@ def stage_package_managers(install_root: Path, env: EnvInfo, result: ToolInstall
                 ],
                 result,
                 "winget PlatformTools",
-            ):
-                result.adb_source = "winget"
+            )
         if not scrcpy_ok:
-            if _run_command(
+            _run_command(
                 [
                     "winget",
                     "install",
@@ -459,17 +469,24 @@ def stage_package_managers(install_root: Path, env: EnvInfo, result: ToolInstall
                 ],
                 result,
                 "winget scrcpy",
-            ):
-                result.scrcpy_source = "winget"
+            )
     elif env.package_manager == "brew":
         if not adb_ok:
-            if _run_command(["brew", "install", "android-platform-tools"], result, "brew android-platform-tools"):
-                result.adb_source = "brew"
+            _run_command(["brew", "install", "android-platform-tools"], result, "brew android-platform-tools")
         if not scrcpy_ok:
-            if _run_command(["brew", "install", "scrcpy"], result, "brew scrcpy"):
-                result.scrcpy_source = "brew"
+            _run_command(["brew", "install", "scrcpy"], result, "brew scrcpy")
     else:
         _log(result, "no supported package manager detected for stage B", warn=True)
+
+    adb_ok, scrcpy_ok = verify_tools_resolved(install_root)
+    if adb_ok:
+        _, src = adb_resolve.resolve_adb_executable(install_root)
+        if src != "not_found":
+            result.adb_source = src
+    if scrcpy_ok:
+        _, src = resolve_scrcpy_executable(install_root)
+        if src != "not_found":
+            result.scrcpy_source = src
 
 
 def print_manual_recovery(os_name: str, install_root: Path, result: ToolInstallResult) -> None:

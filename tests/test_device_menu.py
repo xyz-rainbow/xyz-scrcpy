@@ -54,8 +54,9 @@ class DeviceMenuHelpersTests(unittest.TestCase):
         self.assertIn("...", rendered)
         self.assertIn(menu.RED, rendered)
 
+    @patch("menu.adb_is_available", return_value=True)
     @patch("menu.run_command")
-    def test_adb_export_apk_to_dir(self, mock_run):
+    def test_adb_export_apk_to_dir(self, mock_run, _adb_ok):
         mock_run.side_effect = [
             (True, "package:/data/app/demo/base.apk", "", 0),
             (True, "", "", 0),

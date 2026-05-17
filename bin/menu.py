@@ -333,6 +333,8 @@ def pick_path_with_gui(ask_directory=False):
 
 
 def adb_list_packages(serial):
+    if not adb_is_available():
+        return None, "adb not available. Re-run install or place platform-tools in vendor/."
     ok, out, err, _ = run_command([_adb_exe(), "-s", serial, "shell", "pm", "list", "packages"])
     if not ok:
         return None, err or "Unable to list packages."
@@ -347,14 +349,20 @@ def adb_list_packages(serial):
 
 
 def adb_install_apk(serial, apk_path):
+    if not adb_is_available():
+        return False, "", "adb not available.", 1
     return run_command([_adb_exe(), "-s", serial, "install", "-r", str(apk_path)])
 
 
 def adb_uninstall_package(serial, package_name):
+    if not adb_is_available():
+        return False, "", "adb not available.", 1
     return run_command([_adb_exe(), "-s", serial, "uninstall", package_name])
 
 
 def adb_disconnect(serial):
+    if not adb_is_available():
+        return False, "", "adb not available.", 1
     ok, out, err, code = run_command([_adb_exe(), "-s", serial, "disconnect"])
     if ok:
         return True, out, err, code
@@ -362,6 +370,8 @@ def adb_disconnect(serial):
 
 
 def adb_export_apk_to_dir(serial, package_name, destination_dir):
+    if not adb_is_available():
+        return False, [], "adb not available."
     ok, out, err, _ = run_command([_adb_exe(), "-s", serial, "shell", "pm", "path", package_name])
     if not ok:
         return False, [], err or "Unable to get APK paths."
