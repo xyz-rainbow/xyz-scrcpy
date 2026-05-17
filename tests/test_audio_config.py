@@ -78,56 +78,81 @@ class AudioConfigTests(unittest.TestCase):
         cfg = menu.normalize_audio_preferences({"audio_target": "device", "active_recall": True})
         self.assertEqual(cfg["audio_target"], "host")
 
+    @patch("menu.adb_wait_for_device", return_value=True)
+    @patch("menu.time.sleep")
     @patch("menu.scrcpy_is_available", return_value=True)
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=False)
     @patch("menu.print")
     @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_host_does_not_add_no_audio(self, mock_popen, _resolve, _print, _mic_support, _bus, _avail):
+    def test_launch_scrcpy_host_does_not_add_no_audio(
+        self, mock_popen, _resolve, _print, _mic_support, _bus, _avail, _sleep, _wait
+    ):
+        mock_popen.return_value.poll.return_value = None
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": False, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertEqual(args[0], "/tmp/vendor/scrcpy")
         self.assertNotIn("--no-audio", args)
 
+    @patch("menu.adb_wait_for_device", return_value=True)
+    @patch("menu.time.sleep")
     @patch("menu.scrcpy_is_available", return_value=True)
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=False)
     @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_device_adds_no_audio(self, mock_popen, _resolve, _mic_support, _bus, _avail):
+    def test_launch_scrcpy_device_adds_no_audio(
+        self, mock_popen, _resolve, _mic_support, _bus, _avail, _sleep, _wait
+    ):
+        mock_popen.return_value.poll.return_value = None
         menu.launch_scrcpy("ABC123", {"audio_target": "device", "active_recall": False, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertIn("--no-audio", args)
 
+    @patch("menu.adb_wait_for_device", return_value=True)
+    @patch("menu.time.sleep")
     @patch("menu.scrcpy_is_available", return_value=True)
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=True)
     @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_forces_host_when_active_recall_on(self, mock_popen, _resolve, _mic_support, _bus, _avail):
+    def test_launch_scrcpy_forces_host_when_active_recall_on(
+        self, mock_popen, _resolve, _mic_support, _bus, _avail, _sleep, _wait
+    ):
+        mock_popen.return_value.poll.return_value = None
         menu.launch_scrcpy("ABC123", {"audio_target": "device", "active_recall": True, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertNotIn("--no-audio", args)
         self.assertIn("--audio-source=mic", args)
 
+    @patch("menu.adb_wait_for_device", return_value=True)
+    @patch("menu.time.sleep")
     @patch("menu.scrcpy_is_available", return_value=True)
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=True)
     @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_adds_mic_flag_when_supported(self, mock_popen, _resolve, _mic_support, _bus, _avail):
+    def test_launch_scrcpy_adds_mic_flag_when_supported(
+        self, mock_popen, _resolve, _mic_support, _bus, _avail, _sleep, _wait
+    ):
+        mock_popen.return_value.poll.return_value = None
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": True, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertIn("--audio-source=mic", args)
 
+    @patch("menu.adb_wait_for_device", return_value=True)
+    @patch("menu.time.sleep")
     @patch("menu.scrcpy_is_available", return_value=True)
     @patch("menu.ensure_microphone_bus")
     @patch("menu.scrcpy_supports_microphone", return_value=False)
     @patch("menu.print")
     @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_skips_mic_flag_when_unsupported(self, mock_popen, _resolve, _print, _mic_support, _bus, _avail):
+    def test_launch_scrcpy_skips_mic_flag_when_unsupported(
+        self, mock_popen, _resolve, _print, _mic_support, _bus, _avail, _sleep, _wait
+    ):
+        mock_popen.return_value.poll.return_value = None
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": True, "microphone_bus": False})
         args = mock_popen.call_args[0][0]
         self.assertNotIn("--audio-source=mic", args)
@@ -156,17 +181,22 @@ class AudioConfigTests(unittest.TestCase):
     def test_microphone_bus_reuses_existing_source_on_windows(self, _exists):
         self.assertTrue(menu.ensure_microphone_bus(True))
 
+    @patch("menu.adb_wait_for_device", return_value=True)
+    @patch("menu.time.sleep")
     @patch("menu.scrcpy_is_available", return_value=True)
     @patch("menu.ensure_microphone_bus", return_value=True)
     @patch("menu.scrcpy_supports_microphone", return_value=False)
     @patch("menu.resolve_scrcpy_binary", return_value="/tmp/vendor/scrcpy")
     @patch("menu.subprocess.Popen")
-    def test_launch_scrcpy_uses_default_env_when_bus_ready(self, mock_popen, _resolve, _mic_support, _bus, _avail):
+    def test_launch_scrcpy_uses_default_env_when_bus_ready(
+        self, mock_popen, _resolve, _mic_support, _bus, _avail, _sleep, _wait
+    ):
+        mock_popen.return_value.poll.return_value = None
         menu.launch_scrcpy("ABC123", {"audio_target": "host", "active_recall": False, "microphone_bus": True})
         env = mock_popen.call_args.kwargs["env"]
         self.assertNotIn("PULSE_SINK", env)
 
-    @patch("menu.sync_alias_launcher")
+    @patch("menu.sync_alias_launcher", return_value=(True, ""))
     @patch("menu.load_config", return_value={"ok": True})
     @patch("menu.save_config")
     @patch("menu.prompt_text_input", return_value="45")
@@ -185,8 +215,9 @@ class AudioConfigTests(unittest.TestCase):
         # Move to cooldown -> Enter precise edit -> move to APPLY -> Enter apply.
         mock_get_key.side_effect = ["\x1b[B", "\x1b[B", "\r"] + (["\x1b[B"] * 7) + ["\r"]
 
-        _, result = menu.settings_screen(cfg)
+        _, result, sync_err = menu.settings_screen(cfg)
         self.assertEqual(result, "apply")
+        self.assertEqual(sync_err, "")
         saved_cfg = mock_save.call_args[0][0]
         self.assertEqual(saved_cfg["open_cooldown_seconds"], 45)
 

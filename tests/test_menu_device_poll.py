@@ -66,6 +66,26 @@ class ListDevicesForMenuTests(unittest.TestCase):
         self.assertEqual(len(devices), 1)
         self.assertEqual(devices[0]["serial"], "ABC123")
 
+    def test_list_devices_for_menu_shows_last_serial_when_adb_empty(self):
+        with (
+            patch("menu.adb_is_available", return_value=True),
+            patch("menu._adb_exe", return_value="/fake/adb"),
+            patch("menu.adb_device_lines", return_value=[]),
+            patch("menu.adb_serial_reachable", return_value=False),
+            patch("menu._device_label_for_serial", return_value="141a98fa [last used]"),
+        ):
+            devices = menu.list_devices_for_menu({"last_device_serial": "141a98fa"})
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["serial"], "141a98fa")
+
+    def test_adb_devices_status_message_with_last_serial(self):
+        with patch("menu.adb_is_available", return_value=True), patch(
+            "menu.adb_device_lines", return_value=[]
+        ):
+            msg = menu.adb_devices_status_message({"last_device_serial": "141a98fa"})
+        self.assertIn("141a98fa", msg)
+        self.assertIn("not listed by adb", msg)
+
     def test_list_devices_for_menu_last_serial_reconnecting(self):
         with (
             patch("menu.adb_is_available", return_value=True),

@@ -22,6 +22,23 @@ class InstallerTests(unittest.TestCase):
         launcher = install_xyz.launcher_path("windows", Path("C:/bin"), "abc")
         self.assertTrue(str(launcher).endswith("abc.cmd"))
 
+    def test_prune_managed_launchers_removes_secondary_alias(self):
+        with tempfile.TemporaryDirectory() as td:
+            install_dir = Path(td) / "app"
+            launcher_dir = Path(td) / "bin"
+            install_dir.mkdir(parents=True)
+            launcher_dir.mkdir(parents=True)
+            (install_dir / "bin").mkdir()
+            (install_dir / "bin" / "launch_with_checks.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            marker = str(install_dir / "bin" / "launch_with_checks.sh")
+            keep = launcher_dir / "xyz-scrcpy"
+            stale = launcher_dir / "xyz-android"
+            keep.write_text(f"bash \"{marker}\"\n", encoding="utf-8")
+            stale.write_text(f"bash \"{marker}\"\n", encoding="utf-8")
+            install_xyz.prune_managed_launchers(launcher_dir, install_dir, "linux", "xyz-scrcpy")
+            self.assertTrue(keep.exists())
+            self.assertFalse(stale.exists())
+
     def test_linux_launcher_includes_vendor_in_path(self):
         with tempfile.TemporaryDirectory() as td:
             install_dir = Path(td) / "app"

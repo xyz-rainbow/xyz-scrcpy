@@ -531,11 +531,42 @@ def adb_try_backup(serial, package_name, destination_dir):
     )
 
 
-def sync_alias_launcher(alias):
-    if not INSTALLER_PATH.exists():
+def _launcher_managed_by_install(launcher_file: Path) -> bool:
+    if not launcher_file.is_file():
         return False
+    markers = (
+        str(ROOT_DIR / "bin" / "launch_with_checks.sh"),
+        str(ROOT_DIR / "bin" / "launch_with_checks.py"),
+    )
     try:
-        subprocess.run(
+        content = launcher_file.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(m in content for m in markers)
+
+
+def stale_managed_launcher_names(current_alias: str) -> list[str]:
+    """Other managed launcher basenames in ~/.local/bin (linux) still on PATH."""
+    if os.name == "nt":
+        return []
+    launcher_dir = Path.home() / ".local" / "bin"
+    if not launcher_dir.is_dir():
+        return []
+    current = normalize_alias(current_alias)
+    stale = []
+    for entry in launcher_dir.iterdir():
+        if not entry.is_file() or entry.name == current:
+            continue
+        if _launcher_managed_by_install(entry):
+            stale.append(entry.name)
+    return stale
+
+
+def sync_alias_launcher(alias) -> tuple[bool, str]:
+    if not INSTALLER_PATH.exists():
+        return False, "Installer not found."
+    try:
+        proc = subprocess.run(
             [
                 "python3",
                 str(INSTALLER_PATH),
@@ -546,12 +577,16 @@ def sync_alias_launcher(alias):
                 "--yes",
             ],
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
-        return True
-    except OSError:
-        return False
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            return False, detail or f"sync-alias failed (exit {proc.returncode})"
+        return True, ""
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
 
 
 def has_audio_pending(cfg):
@@ -592,7 +627,7 @@ def adb_device_lines():
     return rows
 
 
-def adb_devices_status_message():
+def adb_devices_status_message(cfg=None):
     """Human hint when adb works but no device is ready for the menu."""
     if not adb_is_available():
         return (
@@ -600,7 +635,13 @@ def adb_devices_status_message():
             "Debian: sudo apt install adb scrcpy"
         )
     rows = adb_device_lines()
+    last_serial = (cfg or {}).get("last_device_serial")
     if not rows:
+        if last_serial:
+            return (
+                f"Phone not listed by adb; showing last device ({last_serial}). "
+                "Enable USB debugging, use a data cable, authorize RSA, then replug USB."
+            )
         return (
             "adb OK but no phone detected. Enable USB debugging, use a data cable, "
             "authorize the RSA prompt on the phone, then replug USB."
@@ -679,10 +720,14 @@ def list_devices_for_menu(cfg):
             }
 
     last_serial = (cfg or {}).get("last_device_serial")
-    if last_serial and last_serial not in by_serial and adb_serial_reachable(adb, last_serial):
+    if last_serial and last_serial not in by_serial:
+        if adb_serial_reachable(adb, last_serial):
+            tag = "reconnecting"
+        else:
+            tag = "last used"
         by_serial[last_serial] = {
             "serial": last_serial,
-            "label": _device_label_for_serial(adb, last_serial, "reconnecting"),
+            "label": _device_label_for_serial(adb, last_serial, tag),
         }
 
     return list(by_serial.values())
@@ -879,9 +924,67 @@ def kill_scrcpy_for_serial(serial: str) -> None:
                 pass
 
 
-def launch_scrcpy(serial, cfg) -> bool:
-    if not scrcpy_is_available():
+def scrcpy_menu_log_path() -> Path:
+    return ROOT_DIR / "config" / "scrcpy-menu.log"
+
+
+def adb_serial_in_device_state(serial: str) -> bool:
+    for listed_serial, state in adb_device_lines():
+        if listed_serial == serial and state == "device":
+            return True
+    return False
+
+
+def adb_wait_for_device(serial: str, timeout_sec: float = 5.0) -> bool:
+    if adb_serial_in_device_state(serial):
+        return True
+    if not adb_is_available():
         return False
+    try:
+        proc = subprocess.run(
+            [_adb_exe(), "-s", serial, "wait-for-device"],
+            capture_output=True,
+            text=True,
+            timeout=max(1.0, timeout_sec),
+            check=False,
+        )
+        return proc.returncode == 0 and adb_serial_in_device_state(serial)
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return False
+
+
+def _scrcpy_child_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "SDL_VIDEODRIVER"):
+        if key in os.environ:
+            env[key] = os.environ[key]
+    return env
+
+
+def _read_scrcpy_log_tail(log_path: Path, max_chars: int = 240) -> str:
+    if not log_path.is_file():
+        return ""
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
+def launch_scrcpy_result(serial, cfg) -> tuple[bool, str]:
+    if not scrcpy_is_available():
+        return False, "scrcpy not found. Re-run install or place scrcpy in vendor/."
+    if not adb_is_available():
+        return False, "adb not available."
+    if not adb_wait_for_device(serial, timeout_sec=5.0):
+        return (
+            False,
+            f"Device {serial} not ready (check: adb devices). "
+            "Enable USB debugging and authorize the phone.",
+        )
     cfg = normalize_audio_preferences(cfg)
     audio_target = str(cfg.get("audio_target", "host")).lower()
     active_recall = bool(cfg.get("active_recall", False))
@@ -896,16 +999,32 @@ def launch_scrcpy(serial, cfg) -> bool:
         else:
             print("[WARN] Microphone is not supported by current scrcpy version.")
     ensure_microphone_bus(microphone_bus)
+    log_path = scrcpy_menu_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=dict(os.environ),
-        )
-    except OSError:
-        return False
-    return True
+        with open(log_path, "a", encoding="utf-8") as log_file:
+            log_file.write(f"\n--- launch {serial} ---\n")
+            log_file.flush()
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                env=_scrcpy_child_env(),
+                cwd=str(ROOT_DIR),
+            )
+    except OSError as exc:
+        return False, str(exc)
+    time.sleep(0.4)
+    if proc.poll() is not None:
+        tail = _read_scrcpy_log_tail(log_path)
+        hint = tail or "scrcpy exited immediately."
+        return False, f"{hint} See config/scrcpy-menu.log"
+    return True, ""
+
+
+def launch_scrcpy(serial, cfg) -> bool:
+    ok, _msg = launch_scrcpy_result(serial, cfg)
+    return ok
 
 
 def render_menu(opts, idx, width, banner=None):
@@ -1122,7 +1241,8 @@ def device_submenu(device, cfg, banner=None):
 
         if selected == "Screen Share":
             updated_cfg = normalize_audio_preferences(updated_cfg)
-            if launch_scrcpy(serial, updated_cfg):
+            ok, err = launch_scrcpy_result(serial, updated_cfg)
+            if ok:
                 updated_cfg["applied_audio_target"] = updated_cfg.get("audio_target", "host")
                 updated_cfg["applied_active_recall"] = bool(updated_cfg.get("active_recall", False))
                 updated_cfg["applied_microphone_bus"] = bool(updated_cfg.get("microphone_bus", False))
@@ -1131,10 +1251,7 @@ def device_submenu(device, cfg, banner=None):
                 updated_cfg = load_config()
                 local_banner = make_banner("OK", f"Screen Share started for {serial}.")
             else:
-                local_banner = make_banner(
-                    "ERROR",
-                    "scrcpy not found. Re-run install or place scrcpy in vendor/.",
-                )
+                local_banner = make_banner("ERROR", err or "Screen Share failed.")
             continue
 
         if selected == "Disconnect":
@@ -1335,14 +1452,14 @@ def settings_screen(cfg):
                 temp_cfg["command_alias"] = normalize_alias(temp_cfg["command_alias"])
                 temp_cfg = normalize_audio_preferences(temp_cfg)
                 save_config(temp_cfg)
-                sync_alias_launcher(temp_cfg["command_alias"])
-                return load_config(), "apply"
+                sync_ok, sync_err = sync_alias_launcher(temp_cfg["command_alias"])
+                return load_config(), "apply", sync_err if not sync_ok else ""
             elif name == "CANCEL":
-                return cfg, "cancel"
+                return cfg, "cancel", ""
             else:
                 apply_precise_edit(name)
         elif key == "\x1b":
-            return cfg, "cancel"
+            return cfg, "cancel", ""
 
 
 def activate_pause_on_exit(cfg):
@@ -1368,12 +1485,21 @@ def main():
     cfg = load_config()
     banner = None
     restore_menu_serial = None
+    alias = normalize_alias(cfg.get("command_alias", "xyz-scrcpy"))
+    banner_parts: list[str] = []
+    stale_launchers = stale_managed_launcher_names(alias)
+    if stale_launchers:
+        banner_parts.append(
+            f"Use `{alias}` — old launcher(s) on PATH: {', '.join(stale_launchers)}"
+        )
     if not adb_is_available():
-        banner = make_banner("WARN", adb_devices_status_message())
+        banner_parts.append(adb_devices_status_message(cfg))
     else:
-        device_hint = adb_devices_status_message()
+        device_hint = adb_devices_status_message(cfg)
         if device_hint:
-            banner = make_banner("WARN", device_hint)
+            banner_parts.append(device_hint)
+    if banner_parts:
+        banner = make_banner("WARN", " | ".join(banner_parts))
     try:
         while True:
             width = terminal_width()
@@ -1431,9 +1557,15 @@ def main():
                         activate_pause_on_exit(cfg)
                     break
                 if selected == "SETTINGS":
-                    cfg, settings_action = settings_screen(cfg)
+                    cfg, settings_action, sync_err = settings_screen(cfg)
                     if settings_action == "apply":
-                        banner = make_banner("OK", "Settings updated.")
+                        if sync_err:
+                            banner = make_banner(
+                                "ERROR",
+                                f"Settings saved but alias sync failed: {sync_err}",
+                            )
+                        else:
+                            banner = make_banner("OK", "Settings updated.")
                         restore_menu_serial = cfg.get("last_device_serial")
                     else:
                         restore_menu_serial = cfg.get("last_device_serial")
@@ -1446,7 +1578,8 @@ def main():
                         cfg = normalize_audio_preferences(cfg)
                         kill_scrcpy_for_serial(target_serial)
                         time.sleep(0.4)
-                        if launch_scrcpy(target_serial, cfg):
+                        ok, err = launch_scrcpy_result(target_serial, cfg)
+                        if ok:
                             cfg["applied_audio_target"] = cfg.get("audio_target", "host")
                             cfg["applied_active_recall"] = bool(cfg.get("active_recall", False))
                             cfg["applied_microphone_bus"] = bool(cfg.get("microphone_bus", False))
@@ -1456,7 +1589,11 @@ def main():
                             banner = make_banner("OK", f"Restarted screen share for {target_serial}.")
                             restore_menu_serial = target_serial
                         else:
-                            banner = make_banner("ERROR", "scrcpy not found; cannot restart screen share.")
+                            banner = make_banner(
+                                "ERROR",
+                                err or "Cannot restart screen share.",
+                            )
+                            restore_menu_serial = target_serial
                     else:
                         banner = make_banner("WARN", "No target device available to restart.")
                     continue

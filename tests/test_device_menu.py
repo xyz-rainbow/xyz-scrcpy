@@ -54,8 +54,9 @@ class DeviceMenuHelpersTests(unittest.TestCase):
         self, _rows, _key, mock_write, _clear
     ):
         cfg = config_loader._normalize_config({})
-        returned_cfg, action = menu.settings_screen(cfg)
+        returned_cfg, action, sync_err = menu.settings_screen(cfg)
         self.assertEqual(action, "cancel")
+        self.assertEqual(sync_err, "")
         self.assertEqual(returned_cfg, cfg)
         rendered = "".join(
             call.args[0] if call.args else call.kwargs.get("s", "")
@@ -127,7 +128,7 @@ class DeviceMenuHelpersTests(unittest.TestCase):
     @patch("menu.get_key")
     @patch("menu.load_config", return_value={"saved": True})
     @patch("menu.save_config")
-    @patch("menu.launch_scrcpy")
+    @patch("menu.launch_scrcpy_result", return_value=(True, ""))
     def test_device_submenu_screen_share(self, _launch, _save, _load, mock_get_key, _stdout_write, _os_system):
         cfg = {
             "audio_target": "host",

@@ -146,6 +146,28 @@ def _is_managed_launcher(launcher_file: Path, install_dir: Path) -> bool:
     return any(m in content for m in markers)
 
 
+def prune_managed_launchers(
+    launcher_dir: Path, install_dir: Path, os_name: str, keep_alias: str
+) -> None:
+    """Remove all install-managed launchers except the canonical alias."""
+    if not launcher_dir.exists():
+        return
+    keep_path = launcher_path(os_name, launcher_dir, keep_alias).resolve()
+    for entry in launcher_dir.iterdir():
+        if not entry.is_file():
+            continue
+        try:
+            if entry.resolve() == keep_path:
+                continue
+        except OSError:
+            continue
+        if _is_managed_launcher(entry, install_dir):
+            try:
+                entry.unlink()
+            except OSError:
+                pass
+
+
 def remove_managed_launchers(paths: dict[str, Path], os_name: str, primary_alias: str) -> None:
     launcher_dir = paths["launcher_dir"]
     install_dir = paths["install_dir"]
@@ -155,14 +177,7 @@ def remove_managed_launchers(paths: dict[str, Path], os_name: str, primary_alias
     if primary_path.exists():
         primary_path.unlink()
 
-    # Defensive cleanup: remove any leftover launchers managed by this install.
-    if not launcher_dir.exists():
-        return
-    for entry in launcher_dir.iterdir():
-        if entry == primary_path:
-            continue
-        if _is_managed_launcher(entry, install_dir):
-            entry.unlink()
+    prune_managed_launchers(launcher_dir, install_dir, os_name, "__none__")
 
 
 def copy_project(src_root: Path, dst_root: Path) -> None:
@@ -769,6 +784,9 @@ def do_install(
         if previous_path != launch_path and previous_path.exists():
             previous_path.unlink()
         write_launcher(os_name, launch_path, paths["install_dir"])
+        prune_managed_launchers(
+            paths["launcher_dir"], paths["install_dir"], os_name, alias
+        )
         install_service(
             os_name,
             paths["service_file"],
@@ -910,6 +928,7 @@ def do_sync_alias(paths: dict[str, Path], os_name: str, alias: str) -> None:
         old_path.unlink()
     save_alias_to_config(install_dir, alias)
     write_launcher(os_name, new_path, install_dir)
+    prune_managed_launchers(paths["launcher_dir"], install_dir, os_name, alias)
     if os_name == "windows" and wps.read_marker():
         mr = wps.read_marker() or {}
         prev_a = str(mr.get("alias") or "").strip()
