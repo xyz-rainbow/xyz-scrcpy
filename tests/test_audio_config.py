@@ -19,13 +19,28 @@ class AudioConfigTests(unittest.TestCase):
             fake_vendor = Path(td) / "scrcpy"
             fake_vendor.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
             fake_vendor.chmod(0o755)
-            with patch("menu.SCRCPY_VENDOR_BIN", fake_vendor):
+            if menu.vb is None:
+                with patch("menu.SCRCPY_VENDOR_BIN", fake_vendor):
+                    self.assertEqual(menu.resolve_scrcpy_binary(), str(fake_vendor))
+                return
+            with patch.object(
+                menu.vb,
+                "resolve_scrcpy_executable",
+                return_value=(str(fake_vendor), "vendor/scrcpy"),
+            ):
                 self.assertEqual(menu.resolve_scrcpy_binary(), str(fake_vendor))
 
     def test_resolve_scrcpy_binary_falls_back_to_path(self):
         with tempfile.TemporaryDirectory() as td:
-            fake_vendor = Path(td) / "scrcpy-missing"
-            with patch("menu.SCRCPY_VENDOR_BIN", fake_vendor):
+            missing = Path(td) / "scrcpy-missing"
+            if menu.vb is None:
+                with patch("menu.SCRCPY_VENDOR_BIN", missing):
+                    self.assertEqual(menu.resolve_scrcpy_binary(), "scrcpy")
+                return
+            with (
+                patch.object(menu.vb, "resolve_scrcpy_executable", return_value=("scrcpy", "not_found")),
+                patch("menu.SCRCPY_VENDOR_BIN", missing),
+            ):
                 self.assertEqual(menu.resolve_scrcpy_binary(), "scrcpy")
 
     def test_defaults_include_audio_target(self):

@@ -51,8 +51,6 @@ import adb_resolve  # noqa: E402
 
 try:
     import vendor_bootstrap as vb  # noqa: E402
-
-    vb.prepend_vendor_to_path(ROOT_DIR)
 except ImportError:
     vb = None  # type: ignore[assignment]
 
@@ -66,6 +64,7 @@ BANNER_COLORS = {"ERROR": RED, "WARN": ORANGE, "OK": GREEN}
 INSTALLABLE_EXTENSIONS = {".apk"}
 ESCAPE_POLL_TIMEOUT = 0.05
 ESCAPE_SEQUENCE_DEADLINE = 0.25
+MAIN_MENU_DEVICE_POLL_SEC = 5
 _ARROW_FINAL_BYTES = frozenset("ABCD")
 
 
@@ -154,19 +153,24 @@ def scrcpy_is_available() -> bool:
     return shutil.which("scrcpy") is not None
 
 
+def _read_key_raw_fd(fd: int) -> str:
+    """Read one key (or escape sequence) from fd already in raw mode."""
+    data = os.read(fd, 1)
+    if not data:
+        return ""
+    ch = data.decode("utf-8", errors="replace")
+    if ch != "\x1b":
+        return ch
+    return _read_escape_sequence(ch, fd)
+
+
 def get_key():
     if os.name != "nt":
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
-            data = os.read(fd, 1)
-            if not data:
-                return ""
-            ch = data.decode("utf-8", errors="replace")
-            if ch != "\x1b":
-                return ch
-            return _read_escape_sequence(ch, fd)
+            return _read_key_raw_fd(fd)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
     else:
@@ -183,6 +187,31 @@ def get_key():
             return ch.decode("utf-8")
         except (UnicodeDecodeError, LookupError):
             return ch.decode("latin-1")
+
+
+def wait_menu_key(timeout_sec: float = MAIN_MENU_DEVICE_POLL_SEC) -> str | None:
+    """Wait for a key or return None on timeout (main menu device polling)."""
+    if os.name != "nt":
+        if not sys.stdin.isatty():
+            return get_key()
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ready, _, _ = select.select([fd], [], [], max(0.0, timeout_sec))
+            if not ready:
+                return None
+            return _read_key_raw_fd(fd)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    import msvcrt
+
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while time.monotonic() < deadline:
+        if msvcrt.kbhit():
+            return get_key()
+        time.sleep(0.05)
+    return None
 
 
 def visible_len(text):
@@ -207,6 +236,48 @@ def trunc_text(text, max_len):
 def terminal_width():
     # Extra margin: integrated terminals may reserve a column; keeps borders inside visible width.
     return max(40, min(120, shutil.get_terminal_size(fallback=(80, 24)).columns - 3))
+
+
+def terminal_rows():
+    try:
+        return max(20, shutil.get_terminal_size(fallback=(80, 24)).lines)
+    except OSError:
+        return 24
+
+
+def visible_page_size(reserved_lines: int = 12) -> int:
+    """Rows available for scrollable content after header, hints, and brand footer."""
+    return max(8, terminal_rows() - reserved_lines)
+
+
+def render_tui_header(title: str, width: int, banner=None) -> list[str]:
+    """Shared top frame for paginated lists and SETTINGS (matches APK package menu)."""
+    border = "=" * width
+    lines: list[str] = []
+    if banner:
+        level = str(banner.get("level", "WARN")).upper()
+        color = BANNER_COLORS.get(level, ORANGE)
+        msg = trunc_text(f"[{level}] {banner.get('message', '')}", width - 2)
+        lines.append(center_line(f"{color}{msg}{RESET}", width))
+        lines.append("")
+    lines.extend(
+        [
+            center_line("[SPACE] [ENTER] [ESC]".center(width), width),
+            center_line(f"{RED}{border}{RESET}", width),
+            center_line(f"{MAGENTA}{title}{RESET}", width),
+            "",
+        ]
+    )
+    return lines
+
+
+def paginated_window(total: int, selected_idx: int, page_size: int) -> tuple[int, int]:
+    """Return (start, end) slice indices centered on selected_idx."""
+    if total <= 0:
+        return 0, 0
+    window_start = max(0, min(selected_idx - (page_size // 2), max(0, total - page_size)))
+    window_end = min(total, window_start + page_size)
+    return window_start, window_end
 
 
 def normalize_alias(alias):
@@ -283,27 +354,11 @@ def show_paginated_selection(
     local_banner = banner
     while True:
         width = terminal_width()
-        border = "=" * width
         total = len(options)
-        window_start = max(0, min(idx - (page_size // 2), max(0, total - page_size)))
-        window_end = min(total, window_start + page_size)
+        window_start, window_end = paginated_window(total, idx, page_size)
         visible = options[window_start:window_end]
 
-        lines = []
-        if local_banner:
-            level = str(local_banner.get("level", "WARN")).upper()
-            color = BANNER_COLORS.get(level, ORANGE)
-            msg = trunc_text(f"[{level}] {local_banner.get('message', '')}", width - 2)
-            lines.append(center_line(f"{color}{msg}{RESET}", width))
-            lines.append("")
-        lines.extend(
-            [
-                center_line("[SPACE] [ENTER] [ESC]".center(width), width),
-                center_line(f"{RED}{border}{RESET}", width),
-                center_line(f"{MAGENTA}{title}{RESET}", width),
-                "",
-            ]
-        )
+        lines = render_tui_header(title, width, banner=local_banner)
 
         if window_start > 0:
             lines.append(center_line("...", width))
@@ -564,23 +619,83 @@ def adb_devices_status_message():
     return "adb: " + "; ".join(hints)
 
 
+def _device_label_for_serial(adb: str, serial: str, state_tag: str = "") -> str:
+    label = serial
+    try:
+        model = subprocess.check_output(
+            [adb, "-s", serial, "shell", "getprop", "ro.product.model"],
+            text=True,
+            timeout=15,
+        ).strip()
+        if model:
+            label = f"{model} ({serial})"
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+    if state_tag:
+        return f"{label} [{state_tag}]"
+    return label
+
+
+def adb_serial_reachable(adb: str, serial: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [adb, "-s", serial, "get-state"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        state = (proc.stdout or proc.stderr or "").strip().lower()
+        return proc.returncode == 0 and state in ("device", "recovery", "sideload", "rescue")
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return False
+
+
 def list_devices():
     if not adb_is_available():
         return []
-    try:
-        adb = _adb_exe()
-        serials = [serial for serial, state in adb_device_lines() if state == "device"]
-        devices = []
-        for serial in serials:
-            model = subprocess.check_output(
-                [adb, "-s", serial, "shell", "getprop", "ro.product.model"],
-                text=True,
-                timeout=15,
-            ).strip()
-            devices.append({"serial": serial, "label": f"{model} ({serial})"})
-        return devices
-    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+    adb = _adb_exe()
+    devices = []
+    for serial, state in adb_device_lines():
+        if state != "device":
+            continue
+        devices.append({"serial": serial, "label": _device_label_for_serial(adb, serial)})
+    return devices
+
+
+def list_devices_for_menu(cfg):
+    """Devices for main menu: ready, offline/unauthorized, and last known serial when reachable."""
+    if not adb_is_available():
         return []
+    adb = _adb_exe()
+    by_serial: dict[str, dict] = {}
+    for serial, state in adb_device_lines():
+        if state == "device":
+            by_serial[serial] = {"serial": serial, "label": _device_label_for_serial(adb, serial)}
+        elif state in ("offline", "unauthorized"):
+            by_serial[serial] = {
+                "serial": serial,
+                "label": _device_label_for_serial(adb, serial, state),
+            }
+
+    last_serial = (cfg or {}).get("last_device_serial")
+    if last_serial and last_serial not in by_serial and adb_serial_reachable(adb, last_serial):
+        by_serial[last_serial] = {
+            "serial": last_serial,
+            "label": _device_label_for_serial(adb, last_serial, "reconnecting"),
+        }
+
+    return list(by_serial.values())
+
+
+def main_menu_index_for_serial(devices, serial: str | None) -> int | None:
+    """Index of device in main-menu opts, or None if not connected."""
+    if not serial:
+        return None
+    for i, device in enumerate(devices):
+        if device["serial"] == serial:
+            return i
+    return None
 
 
 def resolve_scrcpy_binary():
@@ -997,13 +1112,13 @@ def device_submenu(device, cfg, banner=None):
             idx = (idx + 1) % len(options)
             continue
         if key == "\x1b":
-            return updated_cfg, make_banner("WARN", "Back to main menu.")
+            return updated_cfg, None
         if key != "\r":
             continue
 
         selected = options[idx]
         if selected == "Back":
-            return updated_cfg, make_banner("WARN", "Back to main menu.")
+            return updated_cfg, None
 
         if selected == "Screen Share":
             updated_cfg = normalize_audio_preferences(updated_cfg)
@@ -1159,13 +1274,7 @@ def settings_screen(cfg):
 
     while True:
         width = terminal_width()
-        border = "=" * width
-        lines = [
-            center_line(f"{GREEN}{border}{RESET}", width),
-            center_line(f"{MAGENTA}SETTINGS - HYBRID EDIT{RESET}", width),
-            center_line(f"{GREEN}{border}{RESET}", width),
-            "",
-        ]
+        lines = render_tui_header("SETTINGS - HYBRID EDIT", width)
         selected = fields[field_idx]
         rendered_rows = []
         for title, group_fields in sections:
@@ -1177,7 +1286,19 @@ def settings_screen(cfg):
         rendered_rows.append(("APPLY", format_field("APPLY")))
         rendered_rows.append(("CANCEL", format_field("CANCEL")))
 
-        for name, row in rendered_rows:
+        sel_row = 0
+        for row_idx, (name, _row) in enumerate(rendered_rows):
+            if name == selected:
+                sel_row = row_idx
+                break
+        total_rows = len(rendered_rows)
+        page_size = visible_page_size(12)
+        window_start, window_end = paginated_window(total_rows, sel_row, page_size)
+
+        if window_start > 0:
+            lines.append(center_line("...", width))
+
+        for name, row in rendered_rows[window_start:window_end]:
             if name is None:
                 if row:
                     lines.append(center_line(f"{MAGENTA}{trunc_text(row, width - 2)}{RESET}", width))
@@ -1189,6 +1310,9 @@ def settings_screen(cfg):
             if changed:
                 text = f"{RED}{text}{RESET}"
             lines.append(center_line((f"> {text}" if name == selected else f"  {text}"), width))
+
+        if window_end < total_rows:
+            lines.append(center_line("...", width))
         lines.append("")
         lines.append(center_line("[UP/DOWN] move [LEFT/RIGHT] quick edit [ENTER] precise/apply [ESC] back", width))
         lines.extend(render_brand_footer(width))
@@ -1243,6 +1367,7 @@ def main():
     idx = 0
     cfg = load_config()
     banner = None
+    restore_menu_serial = None
     if not adb_is_available():
         banner = make_banner("WARN", adb_devices_status_message())
     else:
@@ -1252,7 +1377,12 @@ def main():
     try:
         while True:
             width = terminal_width()
-            devices = list_devices()
+            devices = list_devices_for_menu(cfg)
+            if restore_menu_serial:
+                restored = main_menu_index_for_serial(devices, restore_menu_serial)
+                if restored is not None:
+                    idx = restored
+                restore_menu_serial = None
             device_labels = [d["label"] for d in devices]
             restart_label = "RESTART"
             if has_audio_pending(cfg):
@@ -1267,13 +1397,34 @@ def main():
             sys.stdout.write("\n".join(render_menu(opts, idx, width, banner=banner)))
             sys.stdout.flush()
 
-            key = get_key()
+            key = wait_menu_key(MAIN_MENU_DEVICE_POLL_SEC)
+            if key is None:
+                if not devices and cfg.get("last_device_serial"):
+                    banner = make_banner(
+                        "WARN",
+                        "Waiting for device... (refreshing every 5s)",
+                        ttl=2,
+                    )
+                elif adb_is_available():
+                    hint = adb_devices_status_message()
+                    if hint:
+                        banner = make_banner("WARN", hint, ttl=2)
+                    else:
+                        banner = tick_banner(banner)
+                continue
             banner = tick_banner(banner)
             if key == "\x1b[A":
                 idx = (idx - 1) % len(opts)
             elif key == "\x1b[B":
                 idx = (idx + 1) % len(opts)
             elif key == "\r":
+                if idx < len(devices):
+                    selected_device = devices[idx]
+                    cfg, sub_banner = device_submenu(selected_device, cfg, banner=banner)
+                    if sub_banner is not None:
+                        banner = sub_banner
+                    restore_menu_serial = selected_device["serial"]
+                    continue
                 selected = opts[idx]
                 if selected == "EXIT":
                     if cfg.get("pause_on_exit"):
@@ -1281,7 +1432,11 @@ def main():
                     break
                 if selected == "SETTINGS":
                     cfg, settings_action = settings_screen(cfg)
-                    banner = make_banner("OK", "Settings updated.") if settings_action == "apply" else make_banner("WARN", "Settings closed.")
+                    if settings_action == "apply":
+                        banner = make_banner("OK", "Settings updated.")
+                        restore_menu_serial = cfg.get("last_device_serial")
+                    else:
+                        restore_menu_serial = cfg.get("last_device_serial")
                     continue
                 if "RESTART" in selected:
                     target_serial = cfg.get("last_device_serial")
@@ -1299,20 +1454,12 @@ def main():
                             save_config(cfg)
                             cfg = load_config()
                             banner = make_banner("OK", f"Restarted screen share for {target_serial}.")
+                            restore_menu_serial = target_serial
                         else:
                             banner = make_banner("ERROR", "scrcpy not found; cannot restart screen share.")
                     else:
                         banner = make_banner("WARN", "No target device available to restart.")
                     continue
-                selected_device = None
-                for device in devices:
-                    if device["label"] == selected:
-                        selected_device = device
-                        break
-                if not selected_device:
-                    banner = make_banner("ERROR", "Device not found in current list.")
-                    continue
-                cfg, banner = device_submenu(selected_device, cfg, banner=banner)
             elif key == "\x1b":
                 break
     finally:

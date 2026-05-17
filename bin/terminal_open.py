@@ -27,7 +27,7 @@ def launcher_geometry() -> str:
     try:
         size = shutil.get_terminal_size(fallback=(100, 28))
         cols = min(max(size.columns, 80), 132)
-        rows = min(max(size.lines, 24), 42)
+        rows = min(max(size.lines, 30), 42)
         return f"{cols}x{rows}"
     except OSError:
         return "100x28"

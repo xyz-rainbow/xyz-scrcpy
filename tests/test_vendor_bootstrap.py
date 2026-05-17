@@ -121,7 +121,12 @@ class VendorBootstrapTests(unittest.TestCase):
                 urls.append(url)
                 return False
 
-            with patch.object(vb, "_download_file", side_effect=fake_download):
+            with (
+                patch.object(vb, "verify_tools_resolved", return_value=(False, False)),
+                patch.object(vb, "_scrcpy_vendor_usable", return_value=False),
+                patch.object(vb, "_adb_vendor_usable", return_value=False),
+                patch.object(vb, "_download_file", side_effect=fake_download),
+            ):
                 vb.stage_vendor_download(root, env, result)
             self.assertTrue(any("unsupported CPU" in a for a in result.attempts))
             self.assertFalse(any("scrcpy-linux" in u for u in urls))
