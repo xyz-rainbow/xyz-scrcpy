@@ -145,7 +145,7 @@ class AudioConfigTests(unittest.TestCase):
     @patch("menu.save_config")
     @patch("menu.prompt_text_input", return_value="45")
     @patch("menu.get_key")
-    @patch("menu.os.system")
+    @patch("menu.clear_screen")
     def test_settings_hybrid_edit_updates_cooldown_on_apply(
         self,
         _clear,

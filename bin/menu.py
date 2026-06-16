@@ -78,6 +78,11 @@ def terminal_width():
     return max(40, min(120, shutil.get_terminal_size(fallback=(80, 24)).columns - 2))
 
 
+def clear_screen():
+    sys.stdout.write("\033c")
+    sys.stdout.flush()
+
+
 def normalize_alias(alias):
     clean = re.sub(r"[^a-zA-Z0-9._-]", "-", str(alias).strip())
     clean = re.sub(r"-{2,}", "-", clean).strip("-")
@@ -443,7 +448,7 @@ def settings_screen(cfg):
             return
         kind = meta["kind"]
         if kind == "text":
-            os.system("clear")
+            clear_screen()
             try:
                 entered = prompt_text_input(meta["prompt"], temp_cfg.get(name, "xyz-scrcpy"))
             except EOFError:
@@ -451,7 +456,7 @@ def settings_screen(cfg):
             temp_cfg[name] = normalize_alias(entered)
             return
         if kind == "int":
-            os.system("clear")
+            clear_screen()
             try:
                 entered = prompt_text_input(meta["prompt"], str(temp_cfg.get(name, meta.get("min", 0))))
             except EOFError:
@@ -498,7 +503,7 @@ def settings_screen(cfg):
             lines.append(center_line((f"> {text}" if name == selected else f"  {text}"), width))
         lines.append("")
         lines.append(center_line("[UP/DOWN] move [LEFT/RIGHT] quick edit [ENTER] precise/apply [ESC] back", width))
-        os.system("clear")
+        clear_screen()
         sys.stdout.write("\n".join(lines))
         sys.stdout.flush()
 
@@ -560,7 +565,7 @@ def main():
             if idx >= len(opts):
                 idx = 0
 
-            os.system("clear")
+            clear_screen()
             sys.stdout.write("\n".join(render_menu(opts, idx, width)))
             sys.stdout.flush()
 
@@ -614,7 +619,7 @@ def main():
     finally:
         if os.path.exists(LOCK_PATH):
             os.remove(LOCK_PATH)
-        os.system("clear")
+        clear_screen()
 
 
 if __name__ == "__main__":
