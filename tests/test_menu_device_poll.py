@@ -3,7 +3,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
@@ -14,12 +14,14 @@ import menu  # noqa: E402
 class WaitMenuKeyTests(unittest.TestCase):
     @patch("menu.os.name", "posix")
     @patch("menu.sys.stdin")
+    @patch("menu.termios", MagicMock(), create=True)
     @patch("menu.termios.tcgetattr", create=True)
     @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.tty", MagicMock(), create=True)
     @patch("menu.tty.setraw", create=True)
     @patch("menu.select.select", return_value=([], [], []))
     def test_wait_menu_key_timeout_returns_none(
-        self, _select, _setraw, _setattr, _getattr, mock_stdin
+        self, _select, _setraw, _setsetattr, _getattr, mock_stdin
     ):
         mock_stdin.isatty.return_value = True
         mock_stdin.fileno.return_value = 0
@@ -27,13 +29,15 @@ class WaitMenuKeyTests(unittest.TestCase):
 
     @patch("menu.os.name", "posix")
     @patch("menu.sys.stdin")
+    @patch("menu.termios", MagicMock(), create=True)
     @patch("menu.termios.tcgetattr", create=True)
     @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.tty", MagicMock(), create=True)
     @patch("menu.tty.setraw", create=True)
     @patch("menu.select.select", return_value=([0], [], []))
     @patch("menu.os.read", return_value=b"a")
     def test_wait_menu_key_reads_key_when_ready(
-        self, _read, _select, _setraw, _setattr, _getattr, mock_stdin
+        self, _read, _select, _setraw, _setsetattr, _getattr, mock_stdin
     ):
         mock_stdin.isatty.return_value = True
         mock_stdin.fileno.return_value = 0
@@ -41,13 +45,15 @@ class WaitMenuKeyTests(unittest.TestCase):
 
     @patch("menu.os.name", "posix")
     @patch("menu.sys.stdin")
+    @patch("menu.termios", MagicMock(), create=True)
     @patch("menu.termios.tcgetattr", create=True)
     @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.tty", MagicMock(), create=True)
     @patch("menu.tty.setraw", create=True)
     @patch("menu.select.select", return_value=([0], [], []))
     @patch("menu._read_key_raw_fd", return_value="\x1b[B")
     def test_wait_menu_key_reads_arrow_sequence(
-        self, _read_key, _select, _setraw, _setattr, _getattr, mock_stdin
+        self, _read_key, _select, _setraw, _setsetattr, _getattr, mock_stdin
     ):
         mock_stdin.isatty.return_value = True
         mock_stdin.fileno.return_value = 0
@@ -141,7 +147,13 @@ class MainMenuPollIntegrationTests(unittest.TestCase):
             ([], None),
             ([{"serial": "ABC123", "label": "Phone (ABC123)"}], None),
         ]
-        with patch("menu.fcntl.flock", create=True), patch("builtins.open", unittest.mock.mock_open()):
+        # On Windows, 'menu.fcntl' is None. Patching None.flock fails even with create=True.
+        # We must ensure menu.fcntl is an object before patching its attributes.
+        with (
+            patch("menu.fcntl", MagicMock()),
+            patch("menu.fcntl.flock", create=True),
+            patch("builtins.open", unittest.mock.mock_open()),
+        ):
             menu.main()
         self.assertGreaterEqual(mock_list.call_count, 2)
         self.assertGreaterEqual(mock_wait.call_count, 2)

@@ -52,7 +52,14 @@ class AdbResolveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(
+                    os.environ,
+                    {
+                        "ANDROID_HOME": "",
+                        "ANDROID_SDK_ROOT": "",
+                        adb_resolve.ENV_PLATFORM_TOOLS: "",
+                    },
+                ),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
