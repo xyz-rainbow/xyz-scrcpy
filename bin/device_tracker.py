@@ -40,8 +40,8 @@ class DeviceTracker:
         Returns (newly_connected, newly_disconnected) serials (device state only).
         """
         self._poll_count += 1
-        current_ready = {serial for serial, state in rows if state == "device"}
-        all_serials = {serial for serial, _state in rows}
+        rows_dict = dict(rows)
+        current_ready = {serial for serial, state in rows_dict.items() if state == "device"}
 
         newly_connected: list[str] = []
         newly_disconnected: list[str] = []
@@ -56,7 +56,9 @@ class DeviceTracker:
         for serial in list(self._connected):
             if serial in current_ready:
                 continue
-            if serial not in all_serials:
+
+            state = rows_dict.get(serial)
+            if state is None:
                 misses = self._miss_counts.get(serial, 0) + 1
                 self._miss_counts[serial] = misses
                 if misses >= self.DISCONNECT_MISS_THRESHOLD:
@@ -66,7 +68,6 @@ class DeviceTracker:
                     entry["connected"] = False
                     entry["adb_state"] = "absent"
             else:
-                state = next((st for s, st in rows if s == serial), "")
                 if state != "device":
                     self._connected.discard(serial)
                     if serial not in newly_disconnected:
@@ -75,7 +76,7 @@ class DeviceTracker:
                     entry["connected"] = False
                     entry["adb_state"] = state
 
-        for serial, state in rows:
+        for serial, state in rows_dict.items():
             if serial not in self._known:
                 self._known[serial] = {
                     "serial": serial,
