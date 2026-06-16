@@ -41,14 +41,29 @@ def kill_xyz_processes() -> None:
 
 
 def clear_runtime_locks() -> None:
-    tmp = Path(tempfile.gettempdir())
-    for name in ("xyz_menu.lock", "xyz_monitor.pid", "xyz_monitor_serials.state"):
-        p = tmp / name
-        if p.is_file():
-            try:
-                p.unlink()
-            except OSError:
-                pass
+    names = (
+        "xyz_menu.lock",
+        "menu.lock",
+        "xyz_monitor.pid",
+        "xyz_monitor_serials.state",
+        "full-checks.pid",
+        "xyz_full_checks.pid",
+    )
+    # New location: repo config directory
+    config_dir = REPO_DIR / "config"
+    # Legacy location: system temp directory
+    temp_dir = Path(tempfile.gettempdir())
+
+    for root in (config_dir, temp_dir):
+        if not root.is_dir():
+            continue
+        for name in names:
+            p = root / name
+            if p.is_file():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
 
 def validate_syntax() -> None:

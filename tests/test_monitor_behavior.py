@@ -10,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MONITOR = ROOT / "bin" / "monitor.py"
-LAST_OPEN_EPOCH_FILE = Path(tempfile.gettempdir()) / "xyz_monitor_last_open.epoch"
 
 
 def run_monitor_test(env_overrides):
@@ -53,16 +52,10 @@ def run_monitor_test(env_overrides):
 
 class MonitorBehaviorTests(unittest.TestCase):
     def setUp(self):
-        try:
-            LAST_OPEN_EPOCH_FILE.unlink()
-        except FileNotFoundError:
-            pass
+        pass
 
     def tearDown(self):
-        try:
-            LAST_OPEN_EPOCH_FILE.unlink()
-        except FileNotFoundError:
-            pass
+        pass
 
     def test_opens_terminal_when_idle(self):
         proc = run_monitor_test({})

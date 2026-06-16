@@ -27,7 +27,7 @@ CHECK_PY = BIN_DIR / "check_and_repair.py"
 MENU_SCRIPT = BIN_DIR / "menu.py"
 LOG_FILE = REPO_DIR / "config" / "check.log"
 FULL_LOG_FILE = REPO_DIR / "config" / "full-check.log"
-FULL_PID_FILE = Path(tempfile.gettempdir()) / "xyz_full_checks.pid"
+FULL_PID_FILE = REPO_DIR / "config" / "full-checks.pid"
 ISSUE_BASE = "https://github.com/xyz-rainbow/xyz-scrcpy/issues/new"
 
 
@@ -93,6 +93,7 @@ def start_background_full_checks() -> None:
             creationflags=flags,
             start_new_session=True,
         )
+        FULL_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         FULL_PID_FILE.write_text(str(proc.pid), encoding="utf-8")
     except OSError:
         pass
