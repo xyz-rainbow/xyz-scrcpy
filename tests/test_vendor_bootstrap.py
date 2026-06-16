@@ -30,7 +30,9 @@ class VendorBootstrapTests(unittest.TestCase):
         url = vb.scrcpy_vendor_download_url(env)
         self.assertIn("macos-aarch64", url or "")
 
-    def test_detect_environment_linux_apt(self):
+    @patch("platform.system", return_value="Linux")
+    @patch("platform.machine", return_value="x86_64")
+    def test_detect_environment_linux_apt(self, _machine, _system):
         def which(name):
             if name == "apt-get":
                 return "/usr/bin/apt-get"
@@ -100,7 +102,7 @@ class VendorBootstrapTests(unittest.TestCase):
                     return False
 
                 def extractall(self, dest, filter=None):
-                    shutil.copytree(bundle, dest / "scrcpy-linux", dirs_exist_ok=True)
+                    shutil.copytree(bundle, Path(dest) / "scrcpy-linux", dirs_exist_ok=True)
 
             with (
                 patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
@@ -160,8 +162,9 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
+            name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
-                zf.writestr("platform-tools/adb", b"#!/bin/sh\necho adb\n")
+                zf.writestr(f"platform-tools/{name}", b"#!/bin/sh\necho adb\n")
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())

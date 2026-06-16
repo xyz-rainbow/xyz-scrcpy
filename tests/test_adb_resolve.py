@@ -49,10 +49,17 @@ class AdbResolveTests(unittest.TestCase):
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):
+        env_to_keep = {}
+        if os.name == "nt":
+            for k in ("SystemRoot", "SystemDrive", "TEMP", "TMP"):
+                if k in os.environ:
+                    env_to_keep[k] = os.environ[k]
+
         with tempfile.TemporaryDirectory() as td:
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
                 patch("adb_resolve._platform_tools_candidates", return_value=[]),
+                patch.dict(os.environ, env_to_keep, clear=True),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
