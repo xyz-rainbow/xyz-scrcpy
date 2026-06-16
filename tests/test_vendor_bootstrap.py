@@ -36,7 +36,11 @@ class VendorBootstrapTests(unittest.TestCase):
                 return "/usr/bin/apt-get"
             return None
 
-        with patch("shutil.which", side_effect=which):
+        with (
+            patch("platform.system", return_value="Linux"),
+            patch("platform.machine", return_value="x86_64"),
+            patch("shutil.which", side_effect=which),
+        ):
             env = vb.detect_environment()
         self.assertEqual(env.package_manager, "apt")
 
@@ -100,7 +104,14 @@ class VendorBootstrapTests(unittest.TestCase):
                     return False
 
                 def extractall(self, dest, filter=None):
-                    shutil.copytree(bundle, dest / "scrcpy-linux", dirs_exist_ok=True)
+                    # Simulate extraction into a directory that might vary by archive content
+                    target = dest / "scrcpy-linux"
+                    target.mkdir(parents=True, exist_ok=True)
+                    for item in bundle.iterdir():
+                        dest_item = target / item.name
+                        if item.name == "scrcpy" and os.name == "nt":
+                            dest_item = target / "scrcpy.exe"
+                        shutil.copy2(item, dest_item)
 
             with (
                 patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
@@ -160,8 +171,9 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
+            name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
-                zf.writestr("platform-tools/adb", b"#!/bin/sh\necho adb\n")
+                zf.writestr(f"platform-tools/{name}", b"#!/bin/sh\necho adb\n")
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())

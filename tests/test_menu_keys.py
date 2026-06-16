@@ -63,9 +63,9 @@ class MenuKeyHelperTests(unittest.TestCase):
 
 class MenuGetKeyTests(unittest.TestCase):
     @patch("menu.os.name", "posix")
-    @patch("menu.tty.setraw")
-    @patch("menu.termios.tcsetattr")
-    @patch("menu.termios.tcgetattr", return_value=MagicMock())
+    @patch("menu.tty.setraw", create=True)
+    @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.termios.tcgetattr", return_value=MagicMock(), create=True)
     @patch("menu.os.read", return_value=b"\x1b")
     @patch("menu._read_escape_sequence", return_value="\x1b[B")
     def test_get_key_delegates_escape_to_reader(self, _mock_read_esc, _os_read, _getattr, _setattr, _setraw):
@@ -76,9 +76,9 @@ class MenuGetKeyTests(unittest.TestCase):
         _mock_read_esc.assert_called_once()
 
     @patch("menu.os.name", "posix")
-    @patch("menu.tty.setraw")
-    @patch("menu.termios.tcsetattr")
-    @patch("menu.termios.tcgetattr", return_value=MagicMock())
+    @patch("menu.tty.setraw", create=True)
+    @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.termios.tcgetattr", return_value=MagicMock(), create=True)
     @patch("menu.os.read", return_value=b"q")
     def test_get_key_plain_char(self, _os_read, _getattr, _setattr, _setraw):
         with patch("sys.stdin") as mock_stdin:
