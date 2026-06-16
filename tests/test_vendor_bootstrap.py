@@ -146,8 +146,10 @@ class VendorBootstrapTests(unittest.TestCase):
             root = Path(td)
             (root / "config").mkdir(parents=True)
             with (
+                patch.dict(os.environ, {}, clear=True),
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
+                patch("shutil.which", return_value=None),
                 patch("adb_resolve.shutil.which", return_value=None),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
@@ -164,6 +166,53 @@ class VendorBootstrapTests(unittest.TestCase):
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())
+
+    def test_vendor_path_export_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend = vb.vendor_dir(root).resolve()
+            line = vb.vendor_path_export_line(root)
+            self.assertEqual(line, f'export PATH="{vend}:$PATH"')
+
+    def test_vendor_path_env_value(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend = str(vb.vendor_dir(root).resolve())
+            with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}):
+                val = vb.vendor_path_env_value(root)
+                self.assertEqual(val, f"{vend}{os.pathsep}/usr/bin:/bin")
+
+            with patch.dict(os.environ, {}, clear=True):
+                val = vb.vendor_path_env_value(root)
+                self.assertEqual(val, f"{vend}{os.pathsep}")
+
+    def test_prepend_vendor_to_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend_dir = vb.vendor_dir(root)
+            vend_dir.mkdir()
+            vend_str = str(vend_dir.resolve())
+
+            # Case 1: PATH is empty
+            with patch.dict(os.environ, {}, clear=True):
+                vb.prepend_vendor_to_path(root)
+                self.assertEqual(os.environ["PATH"], vend_str + os.pathsep)
+
+            # Case 2: PATH has other values
+            with patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
+                vb.prepend_vendor_to_path(root)
+                self.assertEqual(os.environ["PATH"], vend_str + os.pathsep + "/usr/bin")
+
+            # Case 3: Already in PATH
+            with patch.dict(os.environ, {"PATH": vend_str + os.pathsep + "/usr/bin"}, clear=True):
+                vb.prepend_vendor_to_path(root)
+                self.assertEqual(os.environ["PATH"], vend_str + os.pathsep + "/usr/bin")
+
+            # Case 4: vendor dir does not exist
+            shutil.rmtree(vend_dir)
+            with patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
+                vb.prepend_vendor_to_path(root)
+                self.assertEqual(os.environ["PATH"], "/usr/bin")
 
 
 if __name__ == "__main__":
