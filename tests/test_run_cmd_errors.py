@@ -24,7 +24,7 @@ class TestRunCmdErrors(unittest.TestCase):
             return None
 
         with (
-            patch("shutil.which", side_effect=mock_which),
+            patch("install_xyz.shutil.which", side_effect=mock_which),
             patch("pathlib.Path.is_file", return_value=True),
             patch("install_xyz.run_cmd") as mock_run_cmd,
             patch("install_xyz._python_has_pip", return_value=False),
@@ -43,7 +43,7 @@ class TestRunCmdErrors(unittest.TestCase):
     def test_install_service_linux_systemctl_failure(self):
         """Test that install_service handles systemctl failure on Linux."""
         with (
-            patch("shutil.which", return_value="/usr/bin/systemctl"),
+            patch("install_xyz.shutil.which", return_value="/usr/bin/systemctl"),
             patch("install_xyz.run_cmd") as mock_run_cmd,
             patch("sys.stdout", new=StringIO()) as fake_out,
             patch("install_xyz.wps.log_install_line"),
@@ -64,7 +64,7 @@ class TestRunCmdErrors(unittest.TestCase):
     def test_install_service_windows_schtasks_failure(self):
         """Test that install_service handles schtasks failure on Windows."""
         with (
-            patch("shutil.which", side_effect=lambda x: "/usr/bin/schtasks" if "schtasks" in x else None),
+            patch("install_xyz.shutil.which", side_effect=lambda x: "/usr/bin/schtasks" if "schtasks" in x else None),
             patch("install_xyz.run_cmd") as mock_run_cmd,
             patch("sys.stdout", new=StringIO()) as fake_out,
             patch("install_xyz.wps.log_install_line"),

@@ -36,7 +36,10 @@ class VendorBootstrapTests(unittest.TestCase):
                 return "/usr/bin/apt-get"
             return None
 
-        with patch("shutil.which", side_effect=which):
+        with (
+            patch("shutil.which", side_effect=which),
+            patch("platform.system", return_value="Linux"),
+        ):
             env = vb.detect_environment()
         self.assertEqual(env.package_manager, "apt")
 
@@ -149,6 +152,7 @@ class VendorBootstrapTests(unittest.TestCase):
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
+                patch.dict(os.environ, {"ANDROID_HOME": "", "ANDROID_SDK_ROOT": "", "XYZ_ANDROID_PLATFORM_TOOLS": "", "LOCALAPPDATA": ""}),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()
