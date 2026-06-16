@@ -149,6 +149,7 @@ class VendorBootstrapTests(unittest.TestCase):
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
+                patch.dict(os.environ, {"ANDROID_HOME": "", "ANDROID_SDK_ROOT": ""}),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()
@@ -164,6 +165,27 @@ class VendorBootstrapTests(unittest.TestCase):
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())
+
+    def test_vendor_path_export_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend = vb.vendor_dir(root)
+            vend.mkdir()
+            line = vb.vendor_path_export_line(root)
+            # resolve() can return WindowsPath or PosixPath, but the string conversion is what matters
+            expected_path = str(vend.resolve())
+            self.assertEqual(line, f'export PATH="{expected_path}:$PATH"')
+
+    def test_vendor_path_env_value(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vend = vb.vendor_dir(root)
+            vend.mkdir()
+            fake_path = "/usr/bin"
+            with patch.dict(os.environ, {"PATH": fake_path}):
+                val = vb.vendor_path_env_value(root)
+                expected = f"{vend.resolve()}{os.pathsep}{fake_path}"
+                self.assertEqual(val, expected)
 
 
 if __name__ == "__main__":
