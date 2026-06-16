@@ -87,7 +87,8 @@ class VendorBootstrapTests(unittest.TestCase):
             (vend / "scrcpy-server").write_bytes(b"old")
             bundle = root / "bundle"
             bundle.mkdir()
-            good_scrcpy = bundle / "scrcpy"
+            scrcpy_name = "scrcpy.exe" if os.name == "nt" else "scrcpy"
+            good_scrcpy = bundle / scrcpy_name
             good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
             good_scrcpy.chmod(0o755)
             (bundle / "scrcpy-server").write_bytes(b"server")
@@ -163,8 +164,9 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
+            adb_name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
-                zf.writestr("platform-tools/adb", b"#!/bin/sh\necho adb\n")
+                zf.writestr(f"platform-tools/{adb_name}", b"#!/bin/sh\necho adb\n")
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())

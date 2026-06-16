@@ -9,7 +9,19 @@ ROOT = Path(__file__).resolve().parent.parent
 INSTALLER_SH = ROOT / "installer.sh"
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+def _bash_usable() -> bool:
+    exe = shutil.which("bash")
+    if not exe:
+        return False
+    try:
+        # On Windows, 'bash' might be a non-functional WSL wrapper.
+        proc = subprocess.run([exe, "--version"], capture_output=True, timeout=5, check=False)
+        return proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@unittest.skipUnless(_bash_usable(), "functional bash not on PATH")
 class InstallerShTests(unittest.TestCase):
     def test_installer_sh_passes_bash_n(self) -> None:
         # Relative script name + cwd=ROOT avoids Windows drive / [] path issues for WSL vs Git Bash.
