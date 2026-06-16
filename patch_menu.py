@@ -3,15 +3,7 @@ import re
 import sys
 from pathlib import Path
 
-def patch_menu():
-    """Deprecated: ``bin/menu.py`` is the single cross-platform source; this script is a no-op."""
-    print(
-        "patch_menu.py is deprecated and does nothing. "
-        "Windows compatibility lives in bin/menu.py upstream."
-    )
-    return
-    base_dir = Path(__file__).parent
-    menu_path = base_dir / "bin" / "menu.py"
+def apply_patches(menu_path: Path):
     if not menu_path.exists():
         print(f"menu.py not found at {menu_path}")
         return
@@ -109,6 +101,14 @@ def patch_menu():
 
     menu_path.write_text(text, encoding="utf-8")
     print("Patched successfully.")
+
+def patch_menu():
+    """Deprecated: ``bin/menu.py`` is the single cross-platform source; this script is a no-op."""
+    print(
+        "patch_menu.py is deprecated and does nothing. "
+        "Windows compatibility lives in bin/menu.py upstream."
+    )
+    return
 
 if __name__ == "__main__":
     patch_menu()
