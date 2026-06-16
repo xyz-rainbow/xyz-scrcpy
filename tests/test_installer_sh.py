@@ -45,13 +45,17 @@ class InstallerShTests(unittest.TestCase):
             ["bash", "-n", "installer.sh"],
             cwd=str(ROOT),
             capture_output=True,
-            text=True,
+            text=False,  # Read raw bytes to handle null bytes if any
             check=False,
         )
-        if proc.returncode != 0 and "Windows Subsystem for Linux has no installed distributions" in (proc.stderr or ""):
+        # On some Windows CI environments, output might contain null bytes from WSL stub
+        out = (proc.stdout or b"").replace(b"\x00", b"").decode("utf-8", "ignore")
+        err = (proc.stderr or b"").replace(b"\x00", b"").decode("utf-8", "ignore")
+
+        if proc.returncode != 0 and "Windows Subsystem for Linux has no installed distributions" in (err + out):
             self.skipTest("WSL bash found but no distributions installed")
 
-        self.assertEqual(proc.returncode, 0, msg=(proc.stderr or "") + (proc.stdout or ""))
+        self.assertEqual(proc.returncode, 0, msg=err + out)
 
     def test_installer_sh_content_invariants(self) -> None:
         text = INSTALLER_SH.read_text(encoding="utf-8")

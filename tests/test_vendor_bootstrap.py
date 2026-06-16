@@ -149,7 +149,7 @@ class VendorBootstrapTests(unittest.TestCase):
             root = Path(td)
             (root / "config").mkdir(parents=True)
             with (
-                patch.dict(os.environ, {}, clear=True),
+                patch("adb_resolve._platform_tools_candidates", return_value=[]),
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
