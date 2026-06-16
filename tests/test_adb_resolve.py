@@ -34,23 +34,27 @@ class AdbResolveTests(unittest.TestCase):
 
     def test_xyz_android_platform_tools_override(self):
         with tempfile.TemporaryDirectory() as td:
-            tools = Path(td) / "platform-tools"
+            td_path = Path(td).resolve()
+            tools = td_path / "platform-tools"
             tools.mkdir(parents=True)
             name = "adb.exe" if os.name == "nt" else "adb"
             (tools / name).write_bytes(b"")
-            root = Path(td) / "repo"
+            root = td_path / "repo"
             root.mkdir()
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
                 patch.dict(os.environ, {adb_resolve.ENV_PLATFORM_TOOLS: str(tools)}),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
-            self.assertEqual(Path(exe), tools / name)
+            self.assertEqual(Path(exe).resolve(), (tools / name).resolve())
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):
         with tempfile.TemporaryDirectory() as td:
-            with patch("adb_resolve.shutil.which", return_value=None):
+            with (
+                patch("adb_resolve.shutil.which", return_value=None),
+                patch.dict(os.environ, {}, clear=True),
+            ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
         self.assertEqual(src, "not_found")

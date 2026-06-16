@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INSTALLER_SH = ROOT / "installer.sh"
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+@unittest.skipUnless(shutil.which("bash") and __import__("os").name != "nt", "bash not on PATH or Windows")
 class InstallerShTests(unittest.TestCase):
     def test_installer_sh_passes_bash_n(self) -> None:
         # Relative script name + cwd=ROOT avoids Windows drive / [] path issues for WSL vs Git Bash.
