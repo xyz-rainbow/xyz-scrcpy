@@ -103,15 +103,33 @@ def launcher_path(os_name: str, launcher_dir: Path, alias: str) -> Path:
     return launcher_dir / alias
 
 
-def _is_managed_launcher(launcher_file: Path, install_dir: Path) -> bool:
-    if not launcher_file.exists() or not launcher_file.is_file():
-        return False
-    marker = str(install_dir / "bin" / "launch_with_checks.sh")
+def _is_managed_launcher(launcher_file: Path, install_dir: Path, os_name: str) -> bool:
+    """Check if a file is a launcher managed by this installation.
+
+    Optimized by checking extension (on Windows), file size, and only reading the
+    start of the file.
+    """
     try:
-        content = launcher_file.read_text(encoding="utf-8", errors="ignore")
+        # Check extension for Windows
+        if os_name == "windows" and not launcher_file.name.lower().endswith(".cmd"):
+            return False
+
+        # Managed launchers are small shell scripts/batch files.
+        # Skip if too large (over 4KB) or empty.
+        stat = launcher_file.stat()
+        if stat.st_size == 0 or stat.st_size > 4096:
+            return False
+
+        if not launcher_file.is_file():
+            return False
+
+        marker = str(install_dir / "bin" / "launch_with_checks.sh")
+        # Read only the first 1KB to find the marker.
+        with open(launcher_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(1024)
+            return marker in content
     except OSError:
         return False
-    return marker in content
 
 
 def remove_managed_launchers(paths: dict[str, Path], os_name: str, primary_alias: str) -> None:
@@ -129,7 +147,7 @@ def remove_managed_launchers(paths: dict[str, Path], os_name: str, primary_alias
     for entry in launcher_dir.iterdir():
         if entry == primary_path:
             continue
-        if _is_managed_launcher(entry, install_dir):
+        if _is_managed_launcher(entry, install_dir, os_name):
             entry.unlink()
 
 
