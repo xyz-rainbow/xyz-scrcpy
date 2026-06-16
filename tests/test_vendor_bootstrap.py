@@ -82,40 +82,40 @@ class VendorBootstrapTests(unittest.TestCase):
             root = Path(td)
             vend = vb.vendor_dir(root)
             vend.mkdir(parents=True)
-            # Force POSIX for this test to match tar behavior
-            with patch("os.name", "posix"):
-                stub = vb.vendor_scrcpy_path(root)
-                stub.write_bytes(b"broken")
-                (vend / "scrcpy-server").write_bytes(b"old")
-                bundle = root / "bundle"
-                bundle.mkdir()
-                good_scrcpy = bundle / "scrcpy"
-                good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
-                good_scrcpy.chmod(0o755)
-                (bundle / "scrcpy-server").write_bytes(b"server")
-                tar_path = root / "fake.tar.gz"
-                tar_path.write_bytes(b"x")
-                result = vb.ToolInstallResult()
 
-                class FakeTar:
-                    def __enter__(self):
-                        return self
+            scrcpy_name = vb.vendor_scrcpy_path(root).name
+            stub = vb.vendor_scrcpy_path(root)
+            stub.write_bytes(b"broken")
+            (vend / "scrcpy-server").write_bytes(b"old")
+            bundle = root / "bundle"
+            bundle.mkdir()
+            good_scrcpy = bundle / scrcpy_name
+            good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
+            vb._chmod_executable(good_scrcpy)
+            (bundle / "scrcpy-server").write_bytes(b"server")
+            tar_path = root / "fake.tar.gz"
+            tar_path.write_bytes(b"x")
+            result = vb.ToolInstallResult()
 
-                    def __exit__(self, *args):
-                        return False
+            class FakeTar:
+                def __enter__(self):
+                    return self
 
-                    def extractall(self, dest, filter=None):
-                        # The implementation expects scrcpy binary inside the extracted tree
-                        # _find_file_named will find it.
-                        shutil.copytree(bundle, dest / "scrcpy-linux", dirs_exist_ok=True)
+                def __exit__(self, *args):
+                    return False
 
-                with (
-                    patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
-                    patch.object(vb, "_scrcpy_vendor_usable", side_effect=[False, True]),
-                ):
-                    ok = vb._extract_scrcpy_tar(tar_path, vend, result)
-                self.assertTrue(ok)
-                self.assertTrue(vb.vendor_scrcpy_path(root).read_bytes().startswith(b"#!"))
+                def extractall(self, dest, filter=None):
+                    # Use os.path.join or strings to avoid Path instantiation issues if os.name were mismatched
+                    extract_dir = Path(dest) / "scrcpy-linux"
+                    shutil.copytree(bundle, extract_dir, dirs_exist_ok=True)
+
+            with (
+                patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
+                patch.object(vb, "_scrcpy_vendor_usable", side_effect=[False, True]),
+            ):
+                ok = vb._extract_scrcpy_tar(tar_path, vend, result)
+            self.assertTrue(ok)
+            self.assertTrue(vb.vendor_scrcpy_path(root).read_bytes().startswith(b"#!"))
 
     def test_stage_vendor_download_skips_scrcpy_on_unsupported_cpu(self):
         with tempfile.TemporaryDirectory() as td:
