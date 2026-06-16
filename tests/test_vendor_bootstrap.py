@@ -149,6 +149,7 @@ class VendorBootstrapTests(unittest.TestCase):
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
+                patch("adb_resolve._platform_tools_candidates", return_value=[]),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()

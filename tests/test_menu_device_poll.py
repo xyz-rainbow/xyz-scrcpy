@@ -14,9 +14,9 @@ import menu  # noqa: E402
 class WaitMenuKeyTests(unittest.TestCase):
     @patch("menu.os.name", "posix")
     @patch("menu.sys.stdin")
-    @patch("menu.termios.tcgetattr")
-    @patch("menu.termios.tcsetattr")
-    @patch("menu.tty.setraw")
+    @patch("menu.termios.tcgetattr", create=True)
+    @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.tty.setraw", create=True)
     @patch("menu.select.select", return_value=([], [], []))
     def test_wait_menu_key_timeout_returns_none(
         self, _select, _setraw, _setattr, _getattr, mock_stdin
@@ -27,9 +27,9 @@ class WaitMenuKeyTests(unittest.TestCase):
 
     @patch("menu.os.name", "posix")
     @patch("menu.sys.stdin")
-    @patch("menu.termios.tcgetattr")
-    @patch("menu.termios.tcsetattr")
-    @patch("menu.tty.setraw")
+    @patch("menu.termios.tcgetattr", create=True)
+    @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.tty.setraw", create=True)
     @patch("menu.select.select", return_value=([0], [], []))
     @patch("menu.os.read", return_value=b"a")
     def test_wait_menu_key_reads_key_when_ready(
@@ -41,9 +41,9 @@ class WaitMenuKeyTests(unittest.TestCase):
 
     @patch("menu.os.name", "posix")
     @patch("menu.sys.stdin")
-    @patch("menu.termios.tcgetattr")
-    @patch("menu.termios.tcsetattr")
-    @patch("menu.tty.setraw")
+    @patch("menu.termios.tcgetattr", create=True)
+    @patch("menu.termios.tcsetattr", create=True)
+    @patch("menu.tty.setraw", create=True)
     @patch("menu.select.select", return_value=([0], [], []))
     @patch("menu._read_key_raw_fd", return_value="\x1b[B")
     def test_wait_menu_key_reads_arrow_sequence(
@@ -141,7 +141,7 @@ class MainMenuPollIntegrationTests(unittest.TestCase):
             ([], None),
             ([{"serial": "ABC123", "label": "Phone (ABC123)"}], None),
         ]
-        with patch("menu.fcntl.flock"), patch("builtins.open", unittest.mock.mock_open()):
+        with patch("menu.fcntl.flock", create=True), patch("builtins.open", unittest.mock.mock_open()):
             menu.main()
         self.assertGreaterEqual(mock_list.call_count, 2)
         self.assertGreaterEqual(mock_wait.call_count, 2)
