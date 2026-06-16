@@ -10,6 +10,17 @@ sys.path.insert(0, str(ROOT / "bin"))
 
 import menu  # noqa: E402
 
+# fcntl, termios, tty are None on Windows.
+# We mock them as modules so they can be patched by decorators.
+import types
+
+if menu.fcntl is None:
+    menu.fcntl = types.ModuleType("fcntl")
+if menu.termios is None:
+    menu.termios = types.ModuleType("termios")
+if menu.tty is None:
+    menu.tty = types.ModuleType("tty")
+
 
 class WaitMenuKeyTests(unittest.TestCase):
     @patch("menu.os.name", "posix")
@@ -141,7 +152,9 @@ class MainMenuPollIntegrationTests(unittest.TestCase):
             ([], None),
             ([{"serial": "ABC123", "label": "Phone (ABC123)"}], None),
         ]
-        with patch("menu.fcntl.flock"), patch("builtins.open", unittest.mock.mock_open()):
+        # fcntl is None on Windows
+        lock_patch = patch("menu.fcntl.flock") if menu.fcntl else patch("menu.os.name")
+        with lock_patch, patch("builtins.open", unittest.mock.mock_open()):
             menu.main()
         self.assertGreaterEqual(mock_list.call_count, 2)
         self.assertGreaterEqual(mock_wait.call_count, 2)

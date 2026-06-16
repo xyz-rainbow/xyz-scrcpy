@@ -45,12 +45,17 @@ class AdbResolveTests(unittest.TestCase):
                 patch.dict(os.environ, {adb_resolve.ENV_PLATFORM_TOOLS: str(tools)}),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
-            self.assertEqual(Path(exe), tools / name)
+            # Use samefile or resolve to avoid case/path-style issues on Windows
+            self.assertTrue(Path(exe).samefile(tools / name))
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):
         with tempfile.TemporaryDirectory() as td:
-            with patch("adb_resolve.shutil.which", return_value=None):
+            # Clear relevant env vars to avoid system adb detection
+            with (
+                patch("adb_resolve.shutil.which", return_value=None),
+                patch.dict(os.environ, {"ANDROID_SDK_ROOT": "", "ANDROID_HOME": "", adb_resolve.ENV_PLATFORM_TOOLS: ""}),
+            ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
         self.assertEqual(src, "not_found")

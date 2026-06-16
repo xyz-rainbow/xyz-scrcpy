@@ -10,6 +10,17 @@ sys.path.insert(0, str(ROOT / "bin"))
 
 import menu  # noqa: E402
 
+# fcntl, termios, tty are None on Windows.
+# We mock them as modules so they can be patched by decorators.
+import types
+
+if menu.fcntl is None:
+    menu.fcntl = types.ModuleType("fcntl")
+if menu.termios is None:
+    menu.termios = types.ModuleType("termios")
+if menu.tty is None:
+    menu.tty = types.ModuleType("tty")
+
 
 class MenuKeyHelperTests(unittest.TestCase):
     def test_normalize_ss3_to_csi(self):

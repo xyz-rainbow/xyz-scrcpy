@@ -157,7 +157,8 @@ def broadcast_environment_change() -> None:
         WM_SETTINGCHANGE = 0x001A
         SMTO_ABORTIFHUNG = 0x0002
         timeout_ms = 5000
-        result = wintypes.DWORD_PTR()
+        # DWORD_PTR is missing in some Python wintypes; c_size_t is equivalent on Win64/Win32.
+        result = getattr(wintypes, "DWORD_PTR", ctypes.c_size_t)()
         env = ctypes.c_wchar_p("Environment")
         ctypes.windll.user32.SendMessageTimeoutW(
             HWND_BROADCAST,
