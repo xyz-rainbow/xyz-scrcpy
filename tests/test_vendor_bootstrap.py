@@ -145,11 +145,12 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "config").mkdir(parents=True)
+            dummy_env = {"USERPROFILE": td, "HOME": td}
             with (
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(os.environ, dummy_env, clear=True),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()

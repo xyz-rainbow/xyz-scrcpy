@@ -45,14 +45,17 @@ class AdbResolveTests(unittest.TestCase):
                 patch.dict(os.environ, {adb_resolve.ENV_PLATFORM_TOOLS: str(tools)}),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
-            self.assertEqual(Path(exe), tools / name)
+            # Use resolve() on both to handle short-path vs long-path on Windows CI
+            self.assertEqual(Path(exe).resolve(), (tools / name).resolve())
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):
         with tempfile.TemporaryDirectory() as td:
+            # Path.home() / expanduser("~") needs USERPROFILE or HOME to avoid RuntimeError.
+            dummy_env = {"USERPROFILE": td, "HOME": td}
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(os.environ, dummy_env, clear=True),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
