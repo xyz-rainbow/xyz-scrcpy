@@ -50,7 +50,10 @@ class AdbResolveTests(unittest.TestCase):
 
     def test_not_found_returns_adb_token(self):
         with tempfile.TemporaryDirectory() as td:
-            with patch("adb_resolve.shutil.which", return_value=None):
+            with (
+                patch("adb_resolve.shutil.which", return_value=None),
+                patch.dict(os.environ, {}, clear=True),
+            ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
         self.assertEqual(src, "not_found")
