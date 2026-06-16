@@ -45,14 +45,23 @@ class AdbResolveTests(unittest.TestCase):
                 patch.dict(os.environ, {adb_resolve.ENV_PLATFORM_TOOLS: str(tools)}),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
-            self.assertEqual(Path(exe), tools / name)
+            # Use resolve() to handle Windows short/long path name discrepancies.
+            self.assertEqual(Path(exe).resolve(), (tools / name).resolve())
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):
         with tempfile.TemporaryDirectory() as td:
+            # We must NOT clear the entire environment on Windows, or Path.home() fails.
+            # Instead, we just clear the specific variables adb_resolve looks for.
+            to_clear = {
+                "ANDROID_SDK_ROOT": "",
+                "ANDROID_HOME": "",
+                adb_resolve.ENV_PLATFORM_TOOLS: "",
+                "LOCALAPPDATA": "",
+            }
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(os.environ, to_clear),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")

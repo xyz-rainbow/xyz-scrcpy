@@ -48,7 +48,7 @@ class InstallerTests(unittest.TestCase):
             launcher = Path(td) / "bin" / "xyz-scrcpy"
             launcher.parent.mkdir()
             install_xyz.write_launcher("linux", launcher, install_dir)
-            text = launcher.read_text(encoding="utf-8")
+            text = launcher.read_text(encoding="utf-8").replace("\\", "/")
             self.assertIn("/vendor", text)
             self.assertIn("export PATH=", text)
 
@@ -58,7 +58,7 @@ class InstallerTests(unittest.TestCase):
             install_dir.mkdir(parents=True)
             (install_dir / "bin").mkdir()
             (install_dir / "bin" / "monitor.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-            unit = install_xyz.linux_service_content(install_dir)
+            unit = install_xyz.linux_service_content(install_dir).replace("\\", "/")
             self.assertIn("Environment=PATH=", unit)
             self.assertIn("/vendor", unit)
 

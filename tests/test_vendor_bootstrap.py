@@ -36,7 +36,10 @@ class VendorBootstrapTests(unittest.TestCase):
                 return "/usr/bin/apt-get"
             return None
 
-        with patch("shutil.which", side_effect=which):
+        with (
+            patch("shutil.which", side_effect=which),
+            patch("platform.system", return_value="Linux"),
+        ):
             env = vb.detect_environment()
         self.assertEqual(env.package_manager, "apt")
 
@@ -84,7 +87,8 @@ class VendorBootstrapTests(unittest.TestCase):
             (vend / "scrcpy-server").write_bytes(b"old")
             bundle = root / "bundle"
             bundle.mkdir()
-            good_scrcpy = bundle / "scrcpy"
+            name = "scrcpy.exe" if os.name == "nt" else "scrcpy"
+            good_scrcpy = bundle / name
             good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
             good_scrcpy.chmod(0o755)
             (bundle / "scrcpy-server").write_bytes(b"server")
@@ -145,11 +149,17 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "config").mkdir(parents=True)
+            to_clear = {
+                "ANDROID_SDK_ROOT": "",
+                "ANDROID_HOME": "",
+                "XYZ_ANDROID_PLATFORM_TOOLS": "",
+                "LOCALAPPDATA": "",
+            }
             with (
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(os.environ, to_clear),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()
@@ -160,8 +170,9 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
+            name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
-                zf.writestr("platform-tools/adb", b"#!/bin/sh\necho adb\n")
+                zf.writestr(f"platform-tools/{name}", b"#!/bin/sh\necho adb\n")
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())
