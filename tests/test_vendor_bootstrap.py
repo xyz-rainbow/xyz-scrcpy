@@ -39,6 +39,7 @@ class VendorBootstrapTests(unittest.TestCase):
         with (
             patch("shutil.which", side_effect=which),
             patch("platform.system", return_value="Linux"),
+            patch("os.name", "posix"),
         ):
             env = vb.detect_environment()
         self.assertEqual(env.package_manager, "apt")
@@ -109,6 +110,7 @@ class VendorBootstrapTests(unittest.TestCase):
                 patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
                 patch.object(vb, "_scrcpy_vendor_usable", side_effect=[False, True]),
                 patch("platform.system", return_value="Linux"),
+                patch("os.name", "posix"),
             ):
                 ok = vb._extract_scrcpy_tar(tar_path, vend, result)
             self.assertTrue(ok)
@@ -146,6 +148,12 @@ class VendorBootstrapTests(unittest.TestCase):
             self.assertTrue(any("WARN" in line for line in result.attempts))
 
     def test_ensure_android_tools_skip_download_runs_manual_when_missing(self):
+        env_to_unset = {
+            "XYZ_ANDROID_PLATFORM_TOOLS": "",
+            "ANDROID_SDK_ROOT": "",
+            "ANDROID_HOME": "",
+            "LOCALAPPDATA": "",
+        }
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "config").mkdir(parents=True)
@@ -153,7 +161,7 @@ class VendorBootstrapTests(unittest.TestCase):
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(os.environ, env_to_unset),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()
@@ -164,15 +172,19 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
-            name = "adb.exe" if os.name == "nt" else "adb"
+            # Hardcode to POSIX style for the test to be consistent
+            name = "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
                 zf.writestr(f"platform-tools/{name}", b"#!/bin/sh\necho adb\n")
             result = vb.ToolInstallResult()
             # Mock it to return False initially so it proceeds to extraction,
             # then True so it doesn't fail usability check if it were called again.
-            with patch.object(vb, "_adb_vendor_usable", side_effect=[False, True]):
+            with (
+                patch.object(vb, "_adb_vendor_usable", side_effect=[False, True]),
+                patch("os.name", "posix"),
+            ):
                 self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
-            self.assertTrue(vb.vendor_adb_path(root).is_file())
+                self.assertTrue(vb.vendor_adb_path(root).is_file())
 
 
 if __name__ == "__main__":

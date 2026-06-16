@@ -50,10 +50,18 @@ class AdbResolveTests(unittest.TestCase):
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):
+        # We must NOT use clear=True because it breaks Path.home() on some platforms (Windows)
+        # Instead, we just ensure the relevant variables are unset or empty.
+        env_to_unset = {
+            "XYZ_ANDROID_PLATFORM_TOOLS": "",
+            "ANDROID_SDK_ROOT": "",
+            "ANDROID_HOME": "",
+            "LOCALAPPDATA": "",
+        }
         with tempfile.TemporaryDirectory() as td:
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(os.environ, env_to_unset),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(Path(td))
         self.assertEqual(exe, "adb")
