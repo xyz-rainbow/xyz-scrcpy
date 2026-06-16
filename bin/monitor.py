@@ -24,7 +24,7 @@ import adb_resolve  # noqa: E402
 MENU_SCRIPT = BIN_DIR / "menu.py"
 CFG_LOADER = BIN_DIR / "config_loader.py"
 
-_STATE_ROOT = Path(os.environ.get("MONITOR_STATE_DIR", tempfile.gettempdir()))
+_STATE_ROOT = Path(os.environ.get("MONITOR_STATE_DIR", REPO_DIR / "config"))
 PID_FILE = _STATE_ROOT / "xyz_monitor.pid"
 SERIAL_STATE_FILE = _STATE_ROOT / "xyz_monitor_serials.state"
 LAST_OPEN_EPOCH_FILE = _STATE_ROOT / "xyz_monitor_last_open.epoch"

@@ -59,8 +59,7 @@ try:
 except ImportError:
     vb = None  # type: ignore[assignment]
 
-import tempfile
-LOCK_PATH = os.path.join(tempfile.gettempdir(), "xyz_menu.lock")
+LOCK_PATH = ROOT_DIR / "config" / "xyz_menu.lock"
 INSTALLER_PATH = ROOT_DIR / "install_xyz.py"
 SCRCPY_VENDOR_BIN = ROOT_DIR / "vendor" / ("scrcpy.exe" if os.name == "nt" else "scrcpy")
 LIME = "\033[38;5;154m"
@@ -1626,6 +1625,7 @@ def activate_pause_on_exit(cfg):
 def main():
     if hasattr(signal, "SIGWINCH"):
         signal.signal(signal.SIGWINCH, lambda *_: None)
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     lock_file = open(LOCK_PATH, "w", encoding="utf-8")
     try:
         if fcntl:

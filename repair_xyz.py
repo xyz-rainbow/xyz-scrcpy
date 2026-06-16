@@ -41,8 +41,27 @@ def kill_xyz_processes() -> None:
 
 
 def clear_runtime_locks() -> None:
+    # Cleanup from new config-based location
+    config_dir = REPO_DIR / "config"
+    lock_names = (
+        "xyz_menu.lock",
+        "xyz_monitor.pid",
+        "xyz_monitor_serials.state",
+        "xyz_full_checks.pid",
+        "xyz_monitor_last_open.epoch",
+        "xyz_monitor_last_block_reason.state",
+    )
+    for name in lock_names:
+        p = config_dir / name
+        if p.is_file():
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    # Cleanup from legacy system temp location
     tmp = Path(tempfile.gettempdir())
-    for name in ("xyz_menu.lock", "xyz_monitor.pid", "xyz_monitor_serials.state"):
+    for name in lock_names:
         p = tmp / name
         if p.is_file():
             try:

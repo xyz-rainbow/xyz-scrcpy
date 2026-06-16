@@ -164,7 +164,7 @@ After install, open a **new** terminal if `xyz-scrcpy` is not found (PATH refres
 - Audio mode is configurable as:
   - `output` (host audio enabled), or
   - `off` (launches with `--no-audio`).
-- Menu lock prevents duplicate concurrent menu sessions (lock file under the system temp directory; on Linux historically `/tmp/xyz_menu.lock`).
+- Menu lock prevents duplicate concurrent menu sessions (lock file under the application `config/` directory).
 
 ### Settings currently implemented
 
