@@ -15,11 +15,11 @@ import menu  # noqa: E402
 import types
 
 if menu.fcntl is None:
-    menu.fcntl = types.ModuleType("fcntl")
+    menu.fcntl = MagicMock()
 if menu.termios is None:
-    menu.termios = types.ModuleType("termios")
+    menu.termios = MagicMock()
 if menu.tty is None:
-    menu.tty = types.ModuleType("tty")
+    menu.tty = MagicMock()
 
 
 class WaitMenuKeyTests(unittest.TestCase):
