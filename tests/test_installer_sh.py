@@ -1,5 +1,6 @@
 """Smoke tests for repo-root installer.sh (Linux/macOS dev menu)."""
 
+import os
 import shutil
 import subprocess
 import unittest
@@ -9,9 +10,36 @@ ROOT = Path(__file__).resolve().parent.parent
 INSTALLER_SH = ROOT / "installer.sh"
 
 
+def is_wsl_bash():
+    bash = shutil.which("bash")
+    if not bash:
+        return False
+    if os.name != "nt":
+        return False
+    try:
+        # Check if it's WSL bash (will fail if no distro)
+        proc = subprocess.run(
+            ["bash", "-c", "true"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        return proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class InstallerShTests(unittest.TestCase):
     def test_installer_sh_passes_bash_n(self) -> None:
+        if os.name == "nt" and not is_wsl_bash():
+            # If on Windows and not WSL bash (e.g. Git Bash), check if it works
+            # Git Bash usually works. If it's broken WSL, skip.
+            try:
+                subprocess.run(["bash", "--version"], capture_output=True, timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                self.skipTest("bash found but not executable (broken WSL?)")
+
         # Relative script name + cwd=ROOT avoids Windows drive / [] path issues for WSL vs Git Bash.
         proc = subprocess.run(
             ["bash", "-n", "installer.sh"],
@@ -20,6 +48,9 @@ class InstallerShTests(unittest.TestCase):
             text=True,
             check=False,
         )
+        if proc.returncode != 0 and "Windows Subsystem for Linux has no installed distributions" in (proc.stderr or ""):
+            self.skipTest("WSL bash found but no distributions installed")
+
         self.assertEqual(proc.returncode, 0, msg=(proc.stderr or "") + (proc.stdout or ""))
 
     def test_installer_sh_content_invariants(self) -> None:
