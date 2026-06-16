@@ -36,7 +36,10 @@ class VendorBootstrapTests(unittest.TestCase):
                 return "/usr/bin/apt-get"
             return None
 
-        with patch("shutil.which", side_effect=which):
+        with (
+            patch("shutil.which", side_effect=which),
+            patch("platform.system", return_value="Linux"),
+        ):
             env = vb.detect_environment()
         self.assertEqual(env.package_manager, "apt")
 
@@ -79,36 +82,40 @@ class VendorBootstrapTests(unittest.TestCase):
             root = Path(td)
             vend = vb.vendor_dir(root)
             vend.mkdir(parents=True)
-            stub = vb.vendor_scrcpy_path(root)
-            stub.write_bytes(b"broken")
-            (vend / "scrcpy-server").write_bytes(b"old")
-            bundle = root / "bundle"
-            bundle.mkdir()
-            good_scrcpy = bundle / "scrcpy"
-            good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
-            good_scrcpy.chmod(0o755)
-            (bundle / "scrcpy-server").write_bytes(b"server")
-            tar_path = root / "fake.tar.gz"
-            tar_path.write_bytes(b"x")
-            result = vb.ToolInstallResult()
+            # Force POSIX for this test to match tar behavior
+            with patch("os.name", "posix"):
+                stub = vb.vendor_scrcpy_path(root)
+                stub.write_bytes(b"broken")
+                (vend / "scrcpy-server").write_bytes(b"old")
+                bundle = root / "bundle"
+                bundle.mkdir()
+                good_scrcpy = bundle / "scrcpy"
+                good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
+                good_scrcpy.chmod(0o755)
+                (bundle / "scrcpy-server").write_bytes(b"server")
+                tar_path = root / "fake.tar.gz"
+                tar_path.write_bytes(b"x")
+                result = vb.ToolInstallResult()
 
-            class FakeTar:
-                def __enter__(self):
-                    return self
+                class FakeTar:
+                    def __enter__(self):
+                        return self
 
-                def __exit__(self, *args):
-                    return False
+                    def __exit__(self, *args):
+                        return False
 
-                def extractall(self, dest, filter=None):
-                    shutil.copytree(bundle, dest / "scrcpy-linux", dirs_exist_ok=True)
+                    def extractall(self, dest, filter=None):
+                        # The implementation expects scrcpy binary inside the extracted tree
+                        # _find_file_named will find it.
+                        shutil.copytree(bundle, dest / "scrcpy-linux", dirs_exist_ok=True)
 
-            with (
-                patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
-                patch.object(vb, "_scrcpy_vendor_usable", side_effect=[False, True]),
-            ):
-                ok = vb._extract_scrcpy_tar(tar_path, vend, result)
-            self.assertTrue(ok)
-            self.assertTrue(vb.vendor_scrcpy_path(root).read_bytes().startswith(b"#!"))
+                with (
+                    patch("vendor_bootstrap.tarfile.open", return_value=FakeTar()),
+                    patch.object(vb, "_scrcpy_vendor_usable", side_effect=[False, True]),
+                ):
+                    ok = vb._extract_scrcpy_tar(tar_path, vend, result)
+                self.assertTrue(ok)
+                self.assertTrue(vb.vendor_scrcpy_path(root).read_bytes().startswith(b"#!"))
 
     def test_stage_vendor_download_skips_scrcpy_on_unsupported_cpu(self):
         with tempfile.TemporaryDirectory() as td:
@@ -148,7 +155,8 @@ class VendorBootstrapTests(unittest.TestCase):
             with (
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
-                patch("adb_resolve.shutil.which", return_value=None),
+                patch.object(vb, "verify_tools_resolved", return_value=(False, False)),
+                patch("adb_resolve.resolve_adb_executable", return_value=("adb", "not_found")),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()
@@ -159,8 +167,9 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
+            name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
-                zf.writestr("platform-tools/adb", b"#!/bin/sh\necho adb\n")
+                zf.writestr(f"platform-tools/{name}", b"bin")
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())

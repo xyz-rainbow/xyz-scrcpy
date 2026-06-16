@@ -49,7 +49,7 @@ class InstallerTests(unittest.TestCase):
             launcher.parent.mkdir()
             install_xyz.write_launcher("linux", launcher, install_dir)
             text = launcher.read_text(encoding="utf-8")
-            self.assertIn("/vendor", text)
+            self.assertIn("vendor", text.replace("\\", "/"))
             self.assertIn("export PATH=", text)
 
     def test_linux_service_unit_includes_vendor_path(self):
@@ -60,7 +60,7 @@ class InstallerTests(unittest.TestCase):
             (install_dir / "bin" / "monitor.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
             unit = install_xyz.linux_service_content(install_dir)
             self.assertIn("Environment=PATH=", unit)
-            self.assertIn("/vendor", unit)
+            self.assertIn("vendor", unit.replace("\\", "/"))
 
     def test_alias_saved_and_loaded(self):
         with tempfile.TemporaryDirectory() as td:

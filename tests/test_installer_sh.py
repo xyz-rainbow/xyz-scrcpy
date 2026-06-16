@@ -12,6 +12,12 @@ INSTALLER_SH = ROOT / "installer.sh"
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class InstallerShTests(unittest.TestCase):
     def test_installer_sh_passes_bash_n(self) -> None:
+        # Skip this specific test if bash exists but cannot execute -n (e.g. WSL stub on Windows without distros)
+        try:
+            subprocess.run(["bash", "--version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, OSError):
+            self.skipTest("bash found but not functional (WSL stub?)")
+
         # Relative script name + cwd=ROOT avoids Windows drive / [] path issues for WSL vs Git Bash.
         proc = subprocess.run(
             ["bash", "-n", "installer.sh"],
