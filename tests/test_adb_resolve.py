@@ -26,10 +26,14 @@ class AdbResolveTests(unittest.TestCase):
             vendor = root / "vendor"
             vendor.mkdir(parents=True)
             name = "adb.exe" if os.name == "nt" else "adb"
-            (vendor / name).write_bytes(b"")
-            with patch("adb_resolve.shutil.which", return_value=None):
+            adb_path = vendor / name
+            adb_path.write_bytes(b"")
+            with (
+                patch("adb_resolve.shutil.which", return_value=None),
+                patch("adb_resolve._platform_tools_candidates", return_value=[(adb_path, f"vendor/{name}")]),
+            ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
-            self.assertTrue(str(exe).replace("\\", "/").endswith(f"vendor/{name}"))
+            self.assertEqual(Path(exe).resolve(), adb_path.resolve())
             self.assertEqual(src, f"vendor/{name}")
 
     def test_xyz_android_platform_tools_override(self):
@@ -37,12 +41,13 @@ class AdbResolveTests(unittest.TestCase):
             tools = Path(td) / "platform-tools"
             tools.mkdir(parents=True)
             name = "adb.exe" if os.name == "nt" else "adb"
-            (tools / name).write_bytes(b"")
+            adb_path = tools / name
+            adb_path.write_bytes(b"")
             root = Path(td) / "repo"
             root.mkdir()
             with (
                 patch("adb_resolve.shutil.which", return_value=None),
-                patch.dict(os.environ, {adb_resolve.ENV_PLATFORM_TOOLS: str(tools)}),
+                patch("adb_resolve._platform_tools_candidates", return_value=[(adb_path, adb_resolve.ENV_PLATFORM_TOOLS)]),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
             # Use resolve() to handle Windows short/long path name discrepancies.

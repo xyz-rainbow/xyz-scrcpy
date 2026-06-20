@@ -89,6 +89,7 @@ class VendorBootstrapTests(unittest.TestCase):
             bundle.mkdir()
             name = "scrcpy.exe" if os.name == "nt" else "scrcpy"
             good_scrcpy = bundle / name
+            good_scrcpy = bundle / ("scrcpy.exe" if os.name == "nt" else "scrcpy")
             good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
             good_scrcpy.chmod(0o755)
             (bundle / "scrcpy-server").write_bytes(b"server")
@@ -156,6 +157,7 @@ class VendorBootstrapTests(unittest.TestCase):
                 "LOCALAPPDATA": "",
             }
             with (
+                patch("adb_resolve._platform_tools_candidates", return_value=[]),
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
@@ -173,6 +175,9 @@ class VendorBootstrapTests(unittest.TestCase):
             name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
                 zf.writestr(f"platform-tools/{name}", b"#!/bin/sh\necho adb\n")
+            adb_name = "adb.exe" if os.name == "nt" else "adb"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                zf.writestr(f"platform-tools/{adb_name}", b"#!/bin/sh\necho adb\n")
             result = vb.ToolInstallResult()
             self.assertTrue(vb._extract_platform_tools_zip(zpath, vb.vendor_dir(root), result))
             self.assertTrue(vb.vendor_adb_path(root).is_file())
