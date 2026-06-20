@@ -87,6 +87,8 @@ class VendorBootstrapTests(unittest.TestCase):
             (vend / "scrcpy-server").write_bytes(b"old")
             bundle = root / "bundle"
             bundle.mkdir()
+            name = "scrcpy.exe" if os.name == "nt" else "scrcpy"
+            good_scrcpy = bundle / name
             good_scrcpy = bundle / ("scrcpy.exe" if os.name == "nt" else "scrcpy")
             good_scrcpy.write_bytes(b"#!/bin/sh\necho scrcpy 3.3.4\n")
             good_scrcpy.chmod(0o755)
@@ -148,11 +150,18 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "config").mkdir(parents=True)
+            to_clear = {
+                "ANDROID_SDK_ROOT": "",
+                "ANDROID_HOME": "",
+                "XYZ_ANDROID_PLATFORM_TOOLS": "",
+                "LOCALAPPDATA": "",
+            }
             with (
                 patch("adb_resolve._platform_tools_candidates", return_value=[]),
                 patch.object(vb, "stage_package_managers"),
                 patch.object(vb, "print_manual_recovery") as mock_manual,
                 patch("adb_resolve.shutil.which", return_value=None),
+                patch.dict(os.environ, to_clear),
             ):
                 result = vb.ensure_android_tools(root, "linux", skip_vendor_download=True)
             mock_manual.assert_called_once()
@@ -163,6 +172,9 @@ class VendorBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             zpath = root / "pt.zip"
+            name = "adb.exe" if os.name == "nt" else "adb"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                zf.writestr(f"platform-tools/{name}", b"#!/bin/sh\necho adb\n")
             adb_name = "adb.exe" if os.name == "nt" else "adb"
             with zipfile.ZipFile(zpath, "w") as zf:
                 zf.writestr(f"platform-tools/{adb_name}", b"#!/bin/sh\necho adb\n")

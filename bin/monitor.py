@@ -255,25 +255,12 @@ def is_monitor_or_scrcpy_active(serial: str) -> tuple[bool, str]:
         return False, ""
 
     menu_path = str(MENU_SCRIPT)
-    for proc in ps.process_iter(["pid", "name", "cmdline"]):
-        try:
-            cmd = " ".join(proc.info.get("cmdline") or ())
-        except (ps.Error, TypeError):
-            continue
-        if "XYZ Monitor -" in cmd:
-            return True, "existing_monitor_window"
-        if menu_path in cmd and "menu.py" in cmd:
-            return True, "existing_menu_process"
-
+    pat = None
     if serial:
         pat = re.compile(r"(scrcpy|scrcpy\.exe).*-s\s+" + re.escape(serial), re.I)
-        for proc in ps.process_iter(["pid", "name", "cmdline"]):
-            try:
-                cmd = " ".join(proc.info.get("cmdline") or ())
-            except (ps.Error, TypeError):
-                continue
-            if pat.search(cmd):
-                return True, "existing_scrcpy_serial"
+
+    found_scrcpy_serial = False
+    found_scrcpy_any = False
 
     for proc in ps.process_iter(["pid", "name", "cmdline"]):
         try:
@@ -281,8 +268,23 @@ def is_monitor_or_scrcpy_active(serial: str) -> tuple[bool, str]:
             cmd = " ".join(proc.info.get("cmdline") or ())
         except (ps.Error, TypeError):
             continue
-        if name in ("scrcpy", "scrcpy.exe") or re.search(r"[/\\]scrcpy(\.exe)?(\s|$)", cmd, re.I):
-            return True, "existing_scrcpy_any"
+
+        if "XYZ Monitor -" in cmd:
+            return True, "existing_monitor_window"
+        if menu_path in cmd and "menu.py" in cmd:
+            return True, "existing_menu_process"
+
+        if pat and not found_scrcpy_serial and pat.search(cmd):
+            found_scrcpy_serial = True
+
+        if not found_scrcpy_any:
+            if name in ("scrcpy", "scrcpy.exe") or re.search(r"[/\\]scrcpy(\.exe)?(\s|$)", cmd, re.I):
+                found_scrcpy_any = True
+
+    if found_scrcpy_serial:
+        return True, "existing_scrcpy_serial"
+    if found_scrcpy_any:
+        return True, "existing_scrcpy_any"
 
     return False, ""
 
