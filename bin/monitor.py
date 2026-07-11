@@ -18,7 +18,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 BIN_DIR = SCRIPT_DIR
 
-LIB_DIR = REPO_DIR / "lib"
+LIB_DIR = next(
+    (REPO_DIR / name for name in ("lib", "pkg") if (REPO_DIR / name / "xyz_scrcpy" / "__init__.py").is_file()),
+    REPO_DIR / "lib",
+)
 for _path in (REPO_DIR, LIB_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))

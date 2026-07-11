@@ -19,6 +19,14 @@ DEV_DIR_NAMES: tuple[str, ...] = (
     "mcps",
     "scripts",
     "docs/internal",
+    "lib_restored",
+    "launchers_restored",
+    "lib_working",
+    "launchers_working",
+    "xyz-scrcpy-fresh",
+    "pkg_test",
+    ".git_recovered",
+    "terminals",
 )
 
 # File globs for shutil.ignore_patterns (copy_project).

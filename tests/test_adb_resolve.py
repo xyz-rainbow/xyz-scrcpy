@@ -7,10 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parent.parent
-for entry in (str(ROOT), str(ROOT / "lib")):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+import tests._paths  # noqa: F401, E402
 
 from xyz_scrcpy import adb_resolve  # noqa: E402
 

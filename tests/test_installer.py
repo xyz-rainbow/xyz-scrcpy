@@ -7,10 +7,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-_ROOT = Path(__file__).resolve().parent.parent
-for _entry in (str(_ROOT), str(_ROOT / "lib")):
-    if _entry not in sys.path:
-        sys.path.insert(0, _entry)
+import tests._paths  # noqa: F401, E402
 
 import xyz_scrcpy.install_xyz as install_xyz  # noqa: E402
 from xyz_scrcpy._paths import repo_root  # noqa: E402

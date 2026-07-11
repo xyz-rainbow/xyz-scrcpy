@@ -7,10 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-_ROOT = Path(__file__).resolve().parent.parent
-for _entry in (str(_ROOT), str(_ROOT / "lib")):
-    if _entry not in sys.path:
-        sys.path.insert(0, _entry)
+import tests._paths  # noqa: F401, E402
 
 from xyz_scrcpy import win_path_shim as wps  # noqa: E402
 

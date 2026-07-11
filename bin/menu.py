@@ -25,7 +25,10 @@ from pathlib import Path
 
 BIN_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BIN_DIR.parent
-LIB_DIR = ROOT_DIR / "lib"
+LIB_DIR = next(
+    (ROOT_DIR / name for name in ("lib", "pkg") if (ROOT_DIR / name / "xyz_scrcpy" / "__init__.py").is_file()),
+    ROOT_DIR / "lib",
+)
 for _path in (str(BIN_DIR), str(ROOT_DIR), str(LIB_DIR)):
     if _path not in sys.path:
         sys.path.insert(0, _path)

@@ -7,14 +7,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER_SH = ROOT / "installer.sh"
-UNIX_INSTALLER_SH = ROOT / "launchers" / "unix" / "installer.sh"
+
+
+def _unix_launcher_dir() -> Path:
+    for name in ("launchers", "pkg_launchers"):
+        candidate = ROOT / name / "unix"
+        if (candidate / "installer.sh").is_file():
+            return candidate
+    return ROOT / "launchers" / "unix"
+
+
+UNIX_INSTALLER_SH = _unix_launcher_dir() / "installer.sh"
 
 
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class InstallerShTests(unittest.TestCase):
     def test_installer_sh_passes_bash_n(self) -> None:
         # Relative script name + cwd=ROOT avoids Windows drive / [] path issues for WSL vs Git Bash.
-        for script in ("installer.sh", "launchers/unix/installer.sh", "launchers/unix/repair_xyz.sh"):
+        unix_prefix = _unix_launcher_dir().relative_to(ROOT).as_posix()
+        for script in ("installer.sh", f"{unix_prefix}/installer.sh", f"{unix_prefix}/repair_xyz.sh"):
             proc = subprocess.run(
                 ["bash", "-n", script],
                 cwd=str(ROOT),
