@@ -1,0 +1,12 @@
+Copyright (c) 2026 Rainbowtechnology / xyz-rainbow. All rights reserved.
+
+This software and associated documentation files (the "Software") are the
+proprietary property of Rainbowtechnology. Unauthorized copying, modification,
+distribution, sublicensing, or use of the Software, in whole or in part, is
+strictly prohibited without prior written permission from the copyright holder.
+
+Third-party components bundled under vendor/ (including but not limited to
+scrcpy and Android platform-tools) remain subject to their respective upstream
+licenses. See the upstream projects for license terms.
+
+For licensing inquiries: rainbow@rainbowtechnology.xyz

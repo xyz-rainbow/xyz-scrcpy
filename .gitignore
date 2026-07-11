@@ -1,0 +1,38 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Test / coverage caches
+.pytest_cache/
+**/.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime state
+config/*.log
+config/*.json
+*.log
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+
+# Cursor / local agent (never ship in releases)
+.cursor/
+.claude/
+agent-transcripts/
+mcps/
+opencode
+terminals/
+.benchmarks/
+uv.lock

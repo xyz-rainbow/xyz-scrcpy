@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" role="img" aria-labelledby="title desc">
+  <title id="title">Installer Flow</title>
+  <desc id="desc">Sequence for clean install, service prompt, test prompt, and initial menu launch.</desc>
+  <defs>
+    <style>
+      .bg { fill: #0b1020; }
+      .step { fill: #111827; stroke: #6b7280; stroke-width: 2; rx: 10; }
+      .text { fill: #f3f4f6; font-family: Arial, sans-serif; font-size: 14px; }
+      .arrow { stroke: #22d3ee; stroke-width: 2.5; fill: none; marker-end: url(#arr); }
+    </style>
+    <marker id="arr" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="900" height="300"/>
+
+  <rect class="step" x="20" y="110" width="150" height="80"/>
+  <text class="text" x="34" y="145">1) Clean uninstall</text>
+  <text class="text" x="34" y="165">previous install</text>
+
+  <rect class="step" x="195" y="110" width="160" height="80"/>
+  <text class="text" x="210" y="145">2) Copy project</text>
+  <text class="text" x="210" y="165">+ write launcher</text>
+
+  <rect class="step" x="380" y="110" width="160" height="80"/>
+  <text class="text" x="395" y="145">3) Prompt:</text>
+  <text class="text" x="395" y="165">Enable service?</text>
+
+  <rect class="step" x="565" y="110" width="160" height="80"/>
+  <text class="text" x="580" y="145">4) Prompt:</text>
+  <text class="text" x="580" y="165">Run tests + log?</text>
+
+  <rect class="step" x="750" y="110" width="130" height="80"/>
+  <text class="text" x="763" y="145">5) Open initial</text>
+  <text class="text" x="763" y="165">mini terminal</text>
+
+  <path class="arrow" d="M170 150 L195 150"/>
+  <path class="arrow" d="M355 150 L380 150"/>
+  <path class="arrow" d="M540 150 L565 150"/>
+  <path class="arrow" d="M725 150 L750 150"/>
+</svg>
