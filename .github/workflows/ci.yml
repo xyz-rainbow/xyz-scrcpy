@@ -26,9 +26,9 @@ jobs:
         run: >
           python -m py_compile
           install_xyz.py repair_xyz.py
-          lib/xyz_scrcpy/_paths.py lib/xyz_scrcpy/_stub_loader.py lib/xyz_scrcpy/install_xyz.py
-          lib/xyz_scrcpy/win_path_shim.py lib/xyz_scrcpy/adb_resolve.py
-          lib/xyz_scrcpy/repair_xyz.py lib/xyz_scrcpy/setup_vendor.py lib/xyz_scrcpy/vendor_bootstrap.py
+          pkg/xyz_scrcpy/_paths.py pkg/xyz_scrcpy/_stub_loader.py pkg/xyz_scrcpy/install_xyz.py
+          pkg/xyz_scrcpy/win_path_shim.py pkg/xyz_scrcpy/adb_resolve.py
+          pkg/xyz_scrcpy/repair_xyz.py pkg/xyz_scrcpy/setup_vendor.py pkg/xyz_scrcpy/vendor_bootstrap.py
           bin/menu.py bin/config_loader.py bin/monitor.py
           bin/check_and_repair.py bin/launch_with_checks.py bin/install_tui.py
           bin/terminal_open.py bin/adb_transport.py bin/device_tracker.py bin/alias_sync.py packaging/excludes.py
@@ -37,7 +37,7 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Ruff lint
-        run: ruff check install_xyz.py repair_xyz.py lib/xyz_scrcpy bin/ tests/ packaging/
+        run: ruff check install_xyz.py repair_xyz.py pkg/xyz_scrcpy bin/ tests/ packaging/
 
       - name: Bash syntax (stub scripts)
         if: runner.os != 'Windows'
@@ -64,7 +64,7 @@ jobs:
 
       - name: Vendor download smoke
         env:
-          PYTHONPATH: lib
+          PYTHONPATH: pkg
         run: |
           python3 -c "
           from pathlib import Path

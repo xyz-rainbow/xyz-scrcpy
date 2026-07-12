@@ -133,18 +133,28 @@ def launcher_path(os_name: str, launcher_dir: Path, alias: str) -> Path:
     return launcher_dir / alias
 
 
-def _is_managed_launcher(launcher_file: Path, install_dir: Path) -> bool:
+def _is_managed_launcher(launcher_file: Path, install_dir: Path, os_name: str = "") -> bool:
     if not launcher_file.exists() or not launcher_file.is_file():
         return False
+    try:
+        if os_name == "windows" and not launcher_file.name.lower().endswith(".cmd") and not launcher_file.name.lower().endswith(".bat"):
+            return False
+        stat = launcher_file.stat()
+        if stat.st_size == 0 or stat.st_size > 4096:
+            return False
+    except OSError:
+        return False
+
     markers = (
         str(install_dir / "bin" / "launch_with_checks.sh"),
         str(install_dir / "bin" / "launch_with_checks.py"),
     )
     try:
-        content = launcher_file.read_text(encoding="utf-8", errors="ignore")
+        with open(launcher_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(1024)
+            return any(m in content for m in markers)
     except OSError:
         return False
-    return any(m in content for m in markers)
 
 
 def prune_managed_launchers(
@@ -162,7 +172,7 @@ def prune_managed_launchers(
                 continue
         except OSError:
             continue
-        if _is_managed_launcher(entry, install_dir):
+        if _is_managed_launcher(entry, install_dir, os_name):
             try:
                 entry.unlink()
             except OSError:
