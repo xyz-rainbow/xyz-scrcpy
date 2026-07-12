@@ -1,12 +1,13 @@
 """Tests for CLI shim .cmd / .bat generation."""
+# ruff: noqa: I001
 
 import tempfile
 import unittest
 from pathlib import Path
 
+import tests._paths  # noqa: F401, E402
 from xyz_scrcpy import win_path_shim as wps  # noqa: E402
 
-import tests._paths  # noqa: F401, E402
 
 
 class ShimCmdTests(unittest.TestCase):

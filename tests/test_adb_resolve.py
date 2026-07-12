@@ -1,4 +1,5 @@
 """Tests for adb_resolve.resolve_adb_executable."""
+# ruff: noqa: I001
 
 import os
 import tempfile
@@ -6,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import tests._paths  # noqa: F401, E402
 from xyz_scrcpy import adb_resolve  # noqa: E402
 
-import tests._paths  # noqa: F401, E402
 
 _MOD = "xyz_scrcpy.adb_resolve"
 
