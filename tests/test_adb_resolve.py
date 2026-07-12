@@ -1,15 +1,14 @@
 """Tests for adb_resolve.resolve_adb_executable."""
 
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import tests._paths  # noqa: F401, E402
-
 from xyz_scrcpy import adb_resolve  # noqa: E402
+
+import tests._paths  # noqa: F401, E402
 
 _MOD = "xyz_scrcpy.adb_resolve"
 
@@ -46,7 +45,7 @@ class AdbResolveTests(unittest.TestCase):
                 patch.dict(os.environ, {adb_resolve.ENV_PLATFORM_TOOLS: str(tools)}),
             ):
                 exe, src = adb_resolve.resolve_adb_executable(root)
-            self.assertEqual(Path(exe), tools / name)
+            self.assertEqual(Path(exe).resolve(), (tools / name).resolve())
             self.assertEqual(src, adb_resolve.ENV_PLATFORM_TOOLS)
 
     def test_not_found_returns_adb_token(self):

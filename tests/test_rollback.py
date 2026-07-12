@@ -1,15 +1,14 @@
 """PATH backup file restore (mocked registry writes)."""
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import tests._paths  # noqa: F401, E402
-
 from xyz_scrcpy import win_path_shim as wps  # noqa: E402
+
+import tests._paths  # noqa: F401, E402
 
 
 class RollbackTests(unittest.TestCase):

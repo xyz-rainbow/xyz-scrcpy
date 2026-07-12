@@ -12,7 +12,7 @@ for _lib_name in ("lib", "pkg"):
 else:
     sys.path.insert(0, str(_root / "lib"))
 
-from xyz_scrcpy._stub_loader import expose_package_module
+from xyz_scrcpy._stub_loader import expose_package_module  # noqa: E402
 
 _impl = expose_package_module("repair_xyz")
 

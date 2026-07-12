@@ -1,5 +1,4 @@
 import json
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -7,10 +6,10 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-import tests._paths  # noqa: F401, E402
-
 import xyz_scrcpy.install_xyz as install_xyz  # noqa: E402
 from xyz_scrcpy._paths import repo_root  # noqa: E402
+
+import tests._paths  # noqa: F401, E402
 
 _PKG = "xyz_scrcpy.install_xyz"
 

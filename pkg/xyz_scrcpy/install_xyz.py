@@ -150,7 +150,7 @@ def _is_managed_launcher(launcher_file: Path, install_dir: Path, os_name: str = 
         str(install_dir / "bin" / "launch_with_checks.py"),
     )
     try:
-        with open(launcher_file, "r", encoding="utf-8", errors="ignore") as f:
+        with open(launcher_file, encoding="utf-8", errors="ignore") as f:
             content = f.read(1024)
             return any(m in content for m in markers)
     except OSError:

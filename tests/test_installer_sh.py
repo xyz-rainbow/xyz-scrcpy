@@ -1,5 +1,6 @@
 """Smoke tests for repo-root installer.sh (Linux/macOS dev menu)."""
 
+import os
 import shutil
 import subprocess
 import unittest
@@ -20,7 +21,7 @@ def _unix_launcher_dir() -> Path:
 UNIX_INSTALLER_SH = _unix_launcher_dir() / "installer.sh"
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+@unittest.skipUnless(shutil.which("bash") and os.name != "nt", "bash not on PATH or running on Windows")
 class InstallerShTests(unittest.TestCase):
     def test_installer_sh_passes_bash_n(self) -> None:
         # Relative script name + cwd=ROOT avoids Windows drive / [] path issues for WSL vs Git Bash.
