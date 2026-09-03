@@ -1,5 +1,13 @@
 # XYZ-scrcpy
 
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10%2B-00f0ff?style=flat-square&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/android-scrcpy-ff2bd6?style=flat-square&logo=android&logoColor=white" alt="scrcpy" />
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-c8ff00?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/github/actions/workflow/status/xyz-rainbow/xyz-scrcpy/ci.yml?style=flat-square&label=CI" alt="CI" />
+  <img src="https://img.shields.io/badge/license-Proprietary-6b7280?style=flat-square" alt="License" />
+</p>
+
 Interactive Android device launcher and monitor on top of `scrcpy`, built for users who want an auto-start background service plus a configurable terminal UI.
 
 <p align="center">
@@ -323,13 +331,7 @@ The Windows Inno installer excludes `scripts\` from the shipped tree (dev-only h
 - `bin/launch_with_checks.py` / `bin/launch_with_checks.sh` — launcher with pre-check gate.
 - `bin/check_and_repair.py` / `bin/check_and_repair.sh` — checks + repair + fail-open status.
 - `bin/config_loader.py` — config defaults and persistence.
-- `tests/` — installer, monitor, and shell flow tests.
-- `systemd/scrcpy-auto.service` — service template/reference.
-- `config/` — runtime config and logs.
-- `docs/launch-linux-strategy.md` — why `monitor.sh` / `launch_with_checks.sh` remain on Linux.
-- `docs/SMOKE_FROM_RELEASE.md` — smoke checks from `.tar.gz` / `.zip` without `git clone`.
-- `docs/audio-mic-restart-risks-walkthrough.md` — risks and operational walkthrough for audio/mic/restart behavior.
-- `assets/` — legacy UI screenshots for README; `docs/assets/` — architecture/install diagrams (SVG).
+- `lib/xyz_scrcpy/` helpers continue below in Feature map.
 
 ## Feature to File Map
 
