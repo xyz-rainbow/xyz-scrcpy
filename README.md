@@ -331,7 +331,13 @@ The Windows Inno installer excludes `scripts\` from the shipped tree (dev-only h
 - `bin/launch_with_checks.py` / `bin/launch_with_checks.sh` — launcher with pre-check gate.
 - `bin/check_and_repair.py` / `bin/check_and_repair.sh` — checks + repair + fail-open status.
 - `bin/config_loader.py` — config defaults and persistence.
-- `lib/xyz_scrcpy/` helpers continue below in Feature map.
+- `tests/` — installer, monitor, and shell flow tests.
+- `systemd/scrcpy-auto.service` — service template/reference.
+- `config/` — runtime config and logs.
+- `docs/launch-linux-strategy.md` — why `monitor.sh` / `launch_with_checks.sh` remain on Linux.
+- `docs/SMOKE_FROM_RELEASE.md` — smoke checks from `.tar.gz` / `.zip` without `git clone`.
+- `docs/audio-mic-restart-risks-walkthrough.md` — risks and operational walkthrough for audio/mic/restart behavior.
+- `assets/` — legacy UI screenshots for README; `docs/assets/` — architecture/install diagrams (SVG).
 
 ## Feature to File Map
 
